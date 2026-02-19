@@ -1044,3 +1044,144 @@ Crear proyecto nuevo:
 16. DRC → 0 errores
 17. Revisar visualmente con 3D viewer
 18. Exportar Gerbers
+
+## APÉNDICE C — Videos y Recursos de Aprendizaje
+
+> Ordenados por área técnica. Ver el orden recomendado en C.9.
+
+---
+
+### C.1 KiCad — Esquemático y Layout PCB
+
+**Canal principal: [Phil's Lab](https://www.youtube.com/@PhilsLab)**
+IPC CID+ certified, especialista en DSP + audio PCB. Es el recurso más directamente aplicable para este proyecto.
+
+| Video | URL | Por qué verlo |
+|---|---|---|
+| KiCad 8 STM32 PCB Design – Full Tutorial | https://www.youtube.com/watch?v=aVUqaB0IMh4 | STM32 + KiCad end-to-end, exactamente el stack de este proyecto |
+| Designing a DSP Audio Board in KiCad | https://www.youtube.com/watch?v=14_jh3nLSsU | PCB de audio con DAC I2S, signal integrity para audio |
+| USB-C Power Delivery – Hardware Design | https://www.youtube.com/watch?v=eFKeNPJq2zs | CC1/CC2, polyfuse, VBUS — sección de power de este proyecto |
+| STM32 Schematic Design (clock, decoupling, SWD) | https://www.youtube.com/watch?v=pm0WnQm_BVHQ | VCAP, cristal 25MHz, reset, SWD — bloque MCU completo |
+| PCB Layout Checklist – Mixed-Signal | https://www.youtube.com/watch?v=VXE_dh7XYDI | AGND/DGND, star ground, rutas analógicas vs digitales |
+| Power Supply Design for Audio (LDO Selection) | https://www.youtube.com/watch?v=Zrn5H1_t1kQ | LDO para audio, PSRR — LT3042/LT3094 de este proyecto |
+| Real-Time DSP on STM32 | https://www.youtube.com/watch?v=6d1GvFVK3H8 | DMA double buffer + CMSIS-DSP — arquitectura SAI1 de este proyecto |
+
+---
+
+### C.2 Teclado Mecánico — PCB (Cherry MX + Encoders)
+
+Directamente aplicable para los 16x Cherry MX y 8x encoders EC11 en KiCad.
+
+| Recurso | URL | Por qué verlo |
+|---|---|---|
+| Joe Scotto – Custom Keyboard PCB from Scratch | https://www.youtube.com/watch?v=8WXpGTIbxlQ | Cherry MX footprints, matrix switches, encoders en KiCad |
+| ai03 – How to Design a Custom Keyboard PCB | https://www.youtube.com/watch?v=BhFqkVggv8Q | Proceso completo con MCU, aplica igual para STM32 |
+| ai03 PCB Designer Guide (guía escrita, 7 partes) | https://wiki.ai03.com/books/pcb-design | KiCad keyboard PCB con USB-C y LEDs |
+
+---
+
+### C.3 Sintetizador Analógico DIY — VCF / VCA / Circuitos
+
+**Canal: [Moritz Klein](https://www.youtube.com/@MoritzKlein0)**
+El mejor recurso pedagógico para entender el AS3320 y THAT2180.
+
+| Video | URL | Por qué verlo |
+|---|---|---|
+| VCO from Scratch (playlist completa) | https://www.youtube.com/playlist?list=PLHeL0JWdJLvTuGCyC3qvx0RL8W5V9R-PT | Pedagogía: cada componente explicado antes de usarlo |
+| MS-20 Filter Clone | https://www.youtube.com/watch?v=v3rMVTOFCVE | VCF analógico OTA — topología del filtro activo |
+| DIY Moog Ladder Filter | https://www.youtube.com/watch?v=VL6XVKPBP4I | Misma topología que el AS3320, explicado visualmente |
+
+**Georgia Tech — Electronics for Music Synthesis (Aaron Lanterman)**
+Curso universitario completo sobre VCF/VCA/envelopes.
+
+| Playlist | URL |
+|---|---|
+| EMS 2010 (48 videos) | https://www.youtube.com/playlist?list=PLXnFQqfHz_iHvvUlt5jV162WUmvnzpoLa |
+| EMS 2011 | https://www.youtube.com/playlist?list=PLXnFQqfHz_iHHFepUHj2r-tWKyfouxX3H |
+
+---
+
+### C.4 STM32 Firmware y HAL — CubeMX / CubeIDE
+
+**Canal: [Controllers Tech](https://www.youtube.com/@ControllersTech)**
+
+| Video | URL | Por qué verlo |
+|---|---|---|
+| STM32 SAI – I2S Audio Output con DMA | https://www.youtube.com/watch?v=1WU5qIVRvN4 | SAI1 → PCM5242, DMA double buffer |
+| STM32 SPI con DMA | https://www.youtube.com/watch?v=t6yhF4WcExM | SPI1 → DAC8564, SPI2 → W25Q128 |
+| STM32 I2C – Master Transmit/Receive | https://www.youtube.com/watch?v=8m0RzBEhkHA | I2C bus: PCM5242 + SSD1306 + PCA9685 + MCP23017 |
+| STM32 USB MIDI / CDC | https://www.youtube.com/watch?v=BmKe1hNs3tg | USB OTG FS class-compliant MIDI |
+| STM32 Encoder Interface (TIM quadrature) | https://www.youtube.com/watch?v=fnrqRcOUe2c | 8x EC11 en modo quadrature con TIMx |
+
+---
+
+### C.5 Fuentes de Alimentación
+
+| Video | URL | Por qué verlo |
+|---|---|---|
+| LDO Regulators – How They Work (Sam Ben-Yaakov) | https://www.youtube.com/watch?v=8LH0PVFf6TE | LT3042/LT3094: PSRR, caps, ruido de salida |
+| Charge Pump Circuits (Sam Ben-Yaakov) | https://www.youtube.com/watch?v=I0rBJXBX3LQ | LT1054 explicado desde primeros principios |
+
+---
+
+### C.6 USB MIDI — Descriptores y Protocolo
+
+| Video | URL | Por qué verlo |
+|---|---|---|
+| USB MIDI 1.0 Descriptor Deep Dive | https://www.youtube.com/watch?v=Ewag-DPNBUE | Formato del usb_midi_desc.c ya escrito en el proyecto |
+| Class-Compliant USB Audio on STM32 | https://www.youtube.com/watch?v=3GklDzgE6GM | Integración de descriptores con HAL USB callbacks |
+
+---
+
+### C.7 Soldadura SMD
+
+| Video | URL | Por qué verlo |
+|---|---|---|
+| SMD Soldering – Collin's Lab (Adafruit) | https://www.youtube.com/watch?v=fYInlAmPnGo | TSSOP28, MSOP, LQFP100 — todos los ICs de este proyecto |
+| EEVblog #997 – SMD Soldering Tutorial Part 3 | https://www.youtube.com/watch?v=b9FC9fAlfQE | Técnica práctica de soldadura SMD casera |
+
+---
+
+### C.8 Recursos Escritos (No-Video)
+
+| Recurso | URL | Para qué |
+|---|---|---|
+| r/PrintedCircuitBoard Wiki | https://www.reddit.com/r/PrintedCircuitBoard/wiki/index/ | Review checklist antes de enviar Gerbers |
+| Synth DIY Wiki (sdiy.info) | https://sdiy.info/wiki/Main_Page | Base de conocimiento completa de synth DIY |
+| Modwiggler – Music Tech DIY | https://www.modwiggler.com/forum/viewforum.php?f=17 | Comunidad profesional synth DIY, peer review de esquemáticos |
+| musicdsp.org | https://musicdsp.org/en/latest/ | Algoritmos de síntesis FM, ADSR, filtros digitales |
+| r/synthdiy Wiki | https://www.reddit.com/r/synthdiy/wiki/resources/ | Libros, proyectos y comunidades DIY curados |
+
+---
+
+### C.9 Orden Recomendado de Visionado
+
+
+ANTES DE ABRIR KICAD:
+  1.  Phil's Lab → KiCad 8 STM32 PCB Design Full Tutorial
+  2.  Phil's Lab → STM32 Schematic Design (clock, decoupling, SWD)
+
+MIENTRAS DISEÑAS EL ESQUEMATICO:
+  3.  Phil's Lab → USB-C Power Design
+  4.  Phil's Lab → Mixed-Signal PCB Layout Checklist
+  5.  Joe Scotto → Custom Keyboard PCB (Cherry MX + encoders en KiCad)
+  6.  ai03 PCB Designer Guide (leer en paralelo con KiCad abierto)
+
+MIENTRAS ESPERAS EL PCB (firmware):
+  7.  Controllers Tech → STM32 SAI I2S + DMA
+  8.  Controllers Tech → STM32 I2C + SPI
+  9.  Controllers Tech → STM32 Encoder (TIM quadrature)
+  10. Phil's Lab → Real-Time DSP on STM32
+
+CUANDO LLEGUEN LAS PLACAS (ensamblaje):
+  11. EEVblog → SMD Soldering Tutorial
+  12. Collin's Lab → SMD Soldering
+
+PARA ENTENDER LOS CIRCUITOS ANALOGICOS (cualquier momento):
+  13. Moritz Klein → DIY Moog Ladder Filter (empieza aqui)
+  14. Moritz Klein → VCO/VCF series completa
+  15. Aaron Lanterman → Georgia Tech EMS (profundidad teorica)
+
+
+
+
