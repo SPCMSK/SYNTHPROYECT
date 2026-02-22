@@ -75,14 +75,16 @@ esquemático antes de cualquier otra cosa — si la alimentación está mal, tod
           │
           ├──► [Polyfuse 2A]──► +5V_BUS  (protección cortocircuito)
           │
-          ├──► [Ferrite 600Ω]──► [LT3042 #1 LDO] ──► +5V_ANA (200mA)
-          │                                               └──► PCM5242 AVDD, DAC8564 AVDD
+          ├──► [Ferrite 600Ω]──► [LT3042 LDO @ 3.3V] ──► +3V3_ANA (200mA)
+          │                                               └──► PCM5122 AVDD + CPVDD
+          │
+          ├──► [Ferrite 600Ω] ──► +5V_BUS_FILT ─────────────────────────────────
+          │                        └──► DAC8565 AVDD (CV out — ruido no crítico)
           │
           ├──► [ADP3335-3.3 LDO 5V→3.3V] ──► +3V3_DIG (500mA)
           │                                      └──► STM32H7, lógica, Flash, OLED
           │
-          └──► [LT1054 charge pump 5V→-5.5V] ──► [LT3094 LDO] ──► -5V_ANA (100mA)
-                                                                    └──► AS3320 VSS, op-amps VEE
+          (SIN LT1054. SIN LT3094. SIN rail -5V_ANA.)
 ```
 
 ### Presupuesto de corriente (total desde +5V_USB)
@@ -289,7 +291,7 @@ Compatible con ST-Link V3 Mini y cualquier J-Link.
 ### 4.3 Conexiones Esquemáticas
 
 ```
-STM32H743 SAI1          PCM5242 (TSSOP28)
+STM32H743 SAI1          PCM5122 (TSSOP28)
 ──────────────          ─────────────────
 PE5 (I2S_BCK)  ──────► Pin 3  (BCK)   − Bit clock
 PE4 (I2S_LRCK) ──────► Pin 4  (LRCK)  − Word clock (fs = 48kHz)
@@ -298,37 +300,42 @@ PE2 (I2S_MCLK) ──────► Pin 2  (SCK)   − System clock (MCLK = 512
 
 PB8 (I2C_SCL)  ──[4.7kΩ pull-up a +3V3]── Pin 17 (SCK/I2C) − Config I2C
 PB9 (I2C_SDA)  ──[4.7kΩ pull-up a +3V3]── Pin 16 (SDA/I2C) − Config I2C
+PC3 (XSMT)     ──[10kΩ pull-up a +3V3]─── Pin 25 (XSMT)    − Soft mute (LOW = silencio)
 
 Pin 22 (ADDR0)  ──── DGND              → Dirección I2C = 0x4C
 Pin 18 (DVDD)   ──── +3V3_DIG + 100nF a DGND + 4.7µF
 Pin 19 (DGND)   ──── DGND
-Pin 1  (AVDD)   ──── +5V_ANA + 100nF a AGND + 4.7µF
+Pin 1  (AVDD)   ──── +3V3_ANA (LT3042) + 100nF a AGND + 4.7µF
 Pin 21 (AGND)   ──── AGND (IMPORTANTE: pin agnd va al plano analógico)
-Pin 23 (CPVDD)  ──── +5V_ANA + 10µF + 100nF (charge pump supply)
+Pin 23 (CPVDD)  ──── +3V3_ANA + 10µF + 100nF (charge pump supply — MISMA red que AVDD)
 Pin 24 (VCOM)   ──── 10µF a AGND   ← condensador de desacoplo del VCOM interno
-Pin 27 (OUTP_L) ──[10µF AC-coupling]──► OPA2134 IN+ (canal L)
-Pin 28 (OUTN_L) ──[10µF AC-coupling]──► OPA2134 IN- (canal L)
-Pin 25 (OUTP_R) ──[10µF AC-coupling]──► AS3320 IN o mezcla
-Pin 26 (OUTN_R) ── AGND via 100Ω    ← si se usa single-ended, terminar aquí
+
+— Salida de audio (señal diferencial → filtro pasivo → jack) —
+Pin 27 (OUTP_L) ──[470Ω]──┬──[100Ω]──► TRS 6.35mm Tip (canal L)
+Pin 28 (OUTN_L) ── AGND   └──[100Ω]──► RCA Izquierda (bifurcación)
+Pin 25 (OUTP_R) ──[470Ω]──┬──[100Ω]──► TRS 6.35mm Ring (canal R)
+Pin 26 (OUTN_R) ── AGND   └──[100Ω]──► RCA Derecha
+                  Filtro anti-alias: 2.2nF a AGND en el nodo central (después de 470Ω)
 
 ```
 
-> **Nota:** El PCM5242 tiene salida diferencial. Para el VCF (mono), usar solo
-> el canal L diferencial a través de un op-amp convertidor diferencial-a-single-ended.
-> El canal R puede usarse para mezcla dry/wet o salida estéreo directa.
+> **Nota:** El PCM5122 produce salida single-ended desde OUTP (OUTN se termina a AGND).
+> El filtro pasivo 470Ω + 2.2nF elimina componentes a alta frecuencia.
+> La bifurcación con 100Ω aísla la carga de TRS del RCA — no se necesita op-amp de salida.
 
 ### 4.4 Inicialización I2C obligatoria
 
-El PCM5242 arranca en modo de clock automático, pero hay que configurarle la frecuencia
+El PCM5122 arranca en modo de clock automático, pero hay que configurarle la frecuencia
 exacta de oversampling via I2C. Con MCLK = 24.576MHz y fs = 48kHz: OSC = 512×fs.
 
 ```c
 // Registro 37 (0x25): I2S data format → 32-bit I2S
-PCM5242_WriteReg(0x25, 0x03);  // 32-bit, I2S format, MSB first
+PCM5122_WriteReg(0x25, 0x03);  // 32-bit, I2S format, MSB first
 // Registro 19 (0x13): Clock source → MCLK (no requiere PLL interno)
-PCM5242_WriteReg(0x13, 0x10);  // MCLK divider reference = MCLK input
+PCM5122_WriteReg(0x13, 0x10);  // MCLK divider reference = MCLK input
 // Registro 2 (0x02): Power state → run
-PCM5242_WriteReg(0x02, 0x00);  // release standby, normal operation
+PCM5122_WriteReg(0x02, 0x00);  // release standby, normal operation
+// XSMT: soft-mute desactivado — poner PC3 HIGH antes de reproducir
 ```
 
 ---
@@ -336,63 +343,79 @@ PCM5242_WriteReg(0x02, 0x00);  // release standby, normal operation
 ## 5. DAC8565 — DAC CV SPI — CV Out externo
 
 ### 5.1 Datasheet
-[TI DAC8564 — ti.com/lit/ds/symlink/dac8564.pdf](https://www.ti.com/lit/ds/symlink/dac8564.pdf)
+[TI DAC8565 — ti.com/lit/ds/symlink/dac8565.pdf](https://www.ti.com/lit/ds/symlink/dac8565.pdf)
 
 ### 5.2 Descripción
 - DAC de 16 bits, 4 canales independientes, interfaz SPI (hasta 50MHz)
-- Salida de voltaje: 0V → VREF (pin VREF + = +5V → salida 0 a 5V)
-- No necesita amplificador de salida — rail-to-rail interno
-- SPI: 24 bits por transferencia (8 bits control + 16 bits dato)
-- Necesita pulso en LDAC_n para actualizar todos los canales simultáneamente
+- **Referencia interna 2.5V** — salida 0V a 2.5V por canal (sin Vref externo)
+- No necesita amplificador de salida — salida direct-to-jack, rail-to-rail interno
+- SPI: 24 bits por transferencia (8 bits control + 16 bits dato), **solo escritura — sin SDO**
+- LDAC: **flanco de subida** actualiza todos los canales simultáneamente (invertido vs DAC8564)
+- AVDD: 2.7V a 5.5V — se alimenta desde +5V_BUS_FILT o desde +3V3_DIG
+- IOVDD: alimentación de la interfaz lógica SPI — debe seguir el nivel del STM32 (+3V3_DIG)
 
 ### 5.3 Conexiones Esquemáticas
 
 ```
-STM32H743 SPI1          DAC8564 (TSSOP16)
+STM32H743 SPI1          DAC8565 (TSSOP16)
 ──────────────          ─────────────────
-PA5 (SPI_SCK)  ──────► Pin 11 (SCLK)   − Hasta 50MHz
-PA7 (SPI_MOSI) ──────► Pin 10 (SDI)    − Datos MSB-first
-PA6 (SPI_MISO) ◄────── Pin 9  (SDO)    − Readback (opcional)
-PB6 (CS_n)     ──────► Pin 12 (~CS)    − Active LOW, pulso por transferencia
-PB7 (LDAC_n)   ──────► Pin 13 (~LDAC)  − Pulso LOW para update simultáneo de 4ch
-                                          (si no se pulsa: los datos quedan en input reg)
+PA5 (SPI_SCK)  ──────► SCLK            − Hasta 50MHz
+PA7 (SPI_MOSI) ──────► SDI (DIN)       − Datos MSB-first (NO HAY SDO/MISO)
+PB6 (DAC_CSn)  ──────► ~SYNC (~CS)     − Active LOW, bajar antes de cada trama
+PB7 (DAC_LDAC) ──────► LDAC            − Mantener LOW mientras se escriben los 4 canales
+                                          SUBIR A HIGH para actualizar simultáneamente
 
-Pin 1  (VREF+)  ──── +5V_ANA (referencia = rango de salida 0-5V)
-Pin 2  (VREF_b) ──── +5V_ANA (boosted ref — conectar a VREF+ en modo normal)
-Pin 15 (AVDD)   ──── +5V_ANA + 100nF a AGND + 4.7µF
-Pin 14 (PVDD)   ──── +5V_DIG + 100nF a DGND
-Pin 16 (GND)    ──── AGND
+AVDD     ──── +5V_BUS_FILT (via ferrite) + 100nF a AGND + 4.7µF
+IOVDD    ──── +3V3_DIG + 100nF a DGND   ← nivel lógico SPI = 3.3V
+AGND     ──── AGND
+GND      ──── AGND
 
-Salidas (buffer con OPA2134):
-Pin 3  (VOUTA)  ──[100Ω]──► OPA2134 buffer ──► VCF_CV (jack + AS3320 ICTL)
-Pin 4  (VOUTB)  ──[100Ω]──► OPA2134 buffer ──► VCA_CV (THAT2180 IN-)
-Pin 5  (VOUTC)  ──[100Ω]──► NE5532  buffer ──► PITCH_CV (jack CV/Gate)
-Pin 6  (VOUTD)  ──[100Ω]──► NE5532  buffer ──► AUX_CV   (jack CV/Gate)
+VREF (interno 2.5V):
+  Pin VREF ──[100nF a AGND]  ← bypass del ref. interno — NO conectar Vref externo
+  Rango de salida: 0V a 2.5V (suficiente para 2.5 octavas @ 1V/oct por canal)
+
+Pines de control:
+  ENABLE  ──── AGND    (active LOW → siempre habilitado)
+  RSTSEL  ──── AGND    (outputs resetean a 0V al arrancar)
+
+Salidas CV (directo a jacks TRS 3.5mm, sin buffer op-amp):
+  VOUTA  ──[100Ω]──► Jack CV1 Tip  (Pitch voz 1)  Sleeve = AGND
+  VOUTB  ──[100Ω]──► Jack CV2 Tip  (Pitch voz 2)  Sleeve = AGND
+  VOUTC  ──[100Ω]──► Jack CV3 Tip  (Mod/Env 1)    Sleeve = AGND
+  VOUTD  ──[100Ω]──► Jack CV4 Tip  (Mod/Env 2)    Sleeve = AGND
+  (100Ω limita corriente de cortocircuito; BAT54S de +5V a AGND en cada jack)
 ```
 
-> **El resistor de 100Ω** entre el pin de salida del DAC8564 y la entrada del buffer
-> op-amp evita oscilaciones si la capacitancia del trace es alta (>100pF).
+> **Sin buffer op-amp:** El DAC8565 tiene salida rail-to-rail de impedancia baja.
+> El resistor de 100Ω en serie es suficiente para proteger el pin de salida si el
+> cable CV se cortocircuita o si un rack Eurorack inyecta voltaje hacia atrás.
+> No se necesita OPA2134 ni NE5532 — ICs eliminados en v2.0.
 
 ### 5.4 Formato SPI — 24 bits
 
 ```
-Bits [23:20]: Control
-  0001 → Write to input register of channel A
-  0011 → Write to input register of channel B
-  0101 → Write to input register of channel C
-  0111 → Write to input register of channel D
-  1001..1111 → Write all + update (depende del bit 20)
+Trama de 24 bits (MSB first):
+  Bits [23:20]: Comando
+    0b0001 (0x1n) → Write input reg canal A, sin actualizar salida
+    0b0011 (0x3n) → Write input reg canal B
+    0b0101 (0x5n) → Write input reg canal C
+    0b0111 (0x7n) → Write input reg canal D
+    0b1111 (0xFn) → Write input reg + actualizar todos los canales inmediatamente
+  Bits [19:4]: Dato DAC 16-bit (MSB first)
+  Bits [3:0]:  No importan (0x0)
 
-Bits [19:4]: Dato DAC (16-bit, MSB first)
-Bits [3:0]:  Irrelevante (se pueden enviar como 0)
+Secuencia recomendada — actualizar 4 canales con LDAC:
+  1. PB7 (LDAC) → LOW   (mantener low durante toda la secuencia)
+  2. PB6 (CS_n) → LOW
+  3. Enviar 24 bits canal A (comando 0x18 + 16 bits dato)
+  4. PB6 → HIGH (latch canal A en input register)
+  5. Repetir pasos 2-4 para canales B, C, D
+  6. PB7 (LDAC) → HIGH  ← flanco de SUBIDA → actualiza los 4 canales
+                            simultáneamente (glitch-free)
 
-Secuencia para actualizar VCF:
-  1. CS_n LOW
-  2. Enviar: 0x10 | (valor>>12 & 0x0F) [primer byte]
-             (valor>>4) & 0xFF           [segundo byte]
-             (valor<<4) & 0xF0          [tercer byte]
-  3. CS_n HIGH
-  4. LDAC_n → LOW (>10ns) → HIGH  ← este pulso activa los 4 canales
+Cálculo de valor DAC para 1V/oct (rango 0–2.5V):
+  cv_volts = note_semitones / 12.0f           // 1 octava = 1.0V
+  dac_code = (uint16_t)(cv_volts / 2.5f * 65535.0f);  // rango 0x0000–0xFFFF
 ```
 
 ---
@@ -571,20 +594,22 @@ NOTA: Los valores 5.1kΩ en CC son exactamente los definidos por la spec USB-C
 **Conector recomendado:** HRO TYPE-C-31-M-12 (SMD, 16 pines, muy común en LCSC)
 Alternativa THT más robusta: Amphenol 12401610E4#2A
 
-### 9.2 LT3042 — LDO Ultra Bajo Ruido (+5V Analógico)
+### 9.2 LT3042 — LDO Ultra Bajo Ruido (+3.3V Analógico para PCM5122)
 
 **Datasheet:** [analog.com/lt3042](https://www.analog.com/media/en/technical-documentation/data-sheets/3042fc.pdf)
 
 ```
 +5V_BUS ──[Ferrite 600Ω@100MHz, 1A]──► LT3042 VIN
-                                        LT3042 VOUT ──► +5V_ANA
-                                        LT3042 SET  ──[100kΩ a AGND]  ← fija Vout a 5V
+                                        LT3042 VOUT ──► +3V3_ANA
+                                        LT3042 SET  ──[33kΩ a AGND]  ← fija Vout a 3.3V (ISET×RSET = 100µA×33k = 3.3V)
                                         LT3042 ILIM ──[360kΩ a AGND]  ← limita a ~200mA
                                         LT3042 EN   ──► +5V_BUS (siempre ON)
                                         LT3042 GND  ──► AGND
                                         C_IN:  10µF X5R 0805 + 100nF C0G a AGND
                                         C_OUT: 10µF X5R 0805 + 100nF C0G a AGND
                                         C_SET: 10nF a AGND (en el pin SET) ← reduce ruido
+
++3V3_ANA ──► PCM5122 AVDD (pin 1) + CPVDD (pin 23)
 ```
 
 ### 9.3 ADP3335-3.3 — LDO 5V → 3.3V Digital
@@ -648,14 +673,17 @@ respecto al LT3042. Verificar el datasheet antes de colocar el footprint.
 Los pines son: OUT, GND×4, IN, SET, ILIM, PG, EN (izquierda a derecha en MSOP10)
 ```
 
-### Resumen: ICs eliminados vs. arquitectura original
+### Resumen: ICs eliminados en v2.0 (digital-only)
 
-| Eliminado | Reemplazado por | Motivo |
-|---|---|---|
-| Mean Well IRM-30-12 (PSU 220V) | Conector USB-C + R 5.1kΩ | Alimentación desde cargador externo |
-| TPS62150 (Buck 12V→5V) | Nada | Ya no hay 12V |
-| LT3042 #2 (para rail negativo — error) | **LT3094EMSE** | El LT3042 no funciona con voltajes negativos |
-| MAX1044 (generaba -12V) | **LT1054** (genera -5.5V desde +5V) | Mayor headroom para el LT3094 |
+| Eliminado | Motivo |
+|---|---|
+| AS3320 (VCF analógico) | Reemplazado por SVF digital en firmware |
+| THAT2180 (VCA analógico) | Reemplazado por multiplicación digital de muestra |
+| OPA2134 (buffer de salida y diferencial) | No necesario — PCM5122 salida directa a filter pasivo |
+| NE5532 (buffer CV) | No necesario — DAC8565 rail-to-rail directo a jacks |
+| LT3094 (LDO -5V) | Rail negativo eliminado — no hay circuitos analógicos bipolares |
+| LT1054 (charge pump) | Rail negativo eliminado |
+| Relay OMRON G6K-2F | No hay señales analógicas que conmutar |
 
 ---
 
@@ -751,7 +779,7 @@ RV4 — Filter Cutoff (10kΩ lineal):
   Pin 2 (wiper) ──► PA1 (ADC1_IN1) — net: POT_CUTOFF
   Pin 3 (CW)  ──► +3V3_DIG
 
-CRÍTICO: NO usar +5V_ANA en el extremo CW — el ADC del STM32H743 es 3.3V máximo.
+CRÍTICO: NO usar +5V en el extremo CW — el ADC del STM32H743 es 3.3V máximo.
 Condensadores de filtro de ADC: 10nF entre wiper y AGND (reduce ruido de aliasing).
 ```
 
@@ -783,13 +811,13 @@ Para PCB final integrado directamente:
 SSD1306 (I2C 0x3C):
   VCC ──► +3V3_DIG + 100nF
   GND ──► DGND
-  SCL ──► PB8 (I2C1_SCL con pull-up 4.7kΩ compartido con PCM5242)
-  SDA ──► PB9 (I2C1_SDA con pull-up 4.7kΩ compartido con PCM5242)
+  SCL ──► PB8 (I2C1_SCL con pull-up 4.7kΩ compartido con PCM5122)
+  SDA ──► PB9 (I2C1_SDA con pull-up 4.7kΩ compartido con PCM5122)
   RES ──► GPIO de STM32 (reset del display, 100nF a GND)
 ```
 
 > El I2C1 comparte bus entre tres ICs — verificar que no hay conflicto de dirección:
-> - PCM5242:  `0x4C` (ADDR0 a GND)
+> - PCM5122:  `0x4C` (ADDR0 a GND)
 > - SSD1306:  `0x3C`
 > - PCA9685:  `0x40` (A0–A5 todos a GND)
 > No hay conflicto. Velocidad: 400kHz (Fast Mode).
@@ -902,13 +930,14 @@ STM32H7 USART1_TX (PA9)
 
 ### 12.3 CV/Gate Salida (Jacks 3.5mm TRS)
 
-Las 4 salidas del DAC8564 (buffereadas por OPA2134/NE5532) van directamente a jacks TRS:
-- **Tip** = señal CV (0 a 5V = 0 a 5 octavas @ 1V/oct)
-- **Sleeve** = GND analógico (AGND)
-- Ring = NC (o puede usarse para gate en formato que lo admite)
+Las 4 salidas del DAC8565 van directamente a jacks TRS 3.5mm sin buffer op-amp:
+- **Tip** = señal CV (0 a 2.5V — referencia interna DAC8565; compatible con Eurorack a 1V/oct = 2.5 oct)
+- **Sleeve** = AGND
+- Ring = NC
 
-Protección en cada jack de salida: diodo **BAT54S** (doble schottky SOT-23) de +5V a AGND —
-evita que un rack Eurorack inyecte voltaje hacia atrás en los amplificadores de salida.
+Protección en cada jack de salida: diodo **BAT54S** (doble schottky SOT-23) entre +5V_BUS_FILT y AGND —
+evita que un rack Eurorack inyecte voltaje hacia atrás. El resistor 100Ω en serie en la salida
+del DAC8565 limita la corriente en caso de cortocircuito.
 
 ---
 
@@ -918,15 +947,17 @@ evita que un rack Eurorack inyecte voltaje hacia atrás en los amplificadores de
 
 ```
 ┌────────────────────────────────────────────────┐  100×100mm (límite JLCPCB tier 1)
-│  [ZONA DIGITAL]              [ZONA ANALÓGICA]  │
-│                                                 │
-│  STM32H743  USB   Flash      PCM5242  AS3320    │
-│  Cristal    OLED  MCP23017   THAT2180 OPA2134   │
-│  SWD conn.  LEDs             DAC8564            │
-│                                                 │
-│  [ZONA POTENCIA]                                │
-│  USB-C  ADP3335  LT3042  LT3094  LT1054        │
-│  (abajo esquina)  (margen del plano analógico)  │
+│  [ZONA DIGITAL]                                    │
+│                                                    │
+│  STM32H743  USB    Flash    OLED    MCP23017       │
+│  Cristal    SWD   W25Q128  PCA9685  Encoders       │
+│                                                    │
+│  [ZONA AUDIO/CV]                                   │
+│  PCM5122  DAC8565  Ferrites  BAT54S                │
+│  Filtro pasivo 470Ω+2.2nF  Jacks TRS/RCA/CV      │
+│                                                    │
+│  [ZONA POTENCIA]                                   │
+│  USB-C  ADP3335  LT3042  (sin LT3094, sin LT1054) │
 │                                                 │
 │  ╔══════════════╗ ┊ ╔════════════════════════╗  │
 │  ║ PLANO DGND   ║ ┊ ║ PLANO AGND             ║  │
@@ -947,29 +978,24 @@ evita que un rack Eurorack inyecte voltaje hacia atrás en los amplificadores de
 3. **Decoupling capacitors:** Colocar a menos de 0.5mm del pin de VDD del IC.
    La via al plano de GND debe salir del pad del condensador, no del pad del IC.
 
-4. **Zona LT1054 (charge pump):** Keep-out de señales analógicas en radio de 15mm.
-   No trazar pistas de audio cerca del nodo de oscilación interna del LT1054.
-
-5. **Líneas USB (D+ y D-):** Rutar en par diferencial, 90Ω impedancia diferencial,
+4. **Líneas USB (D+ y D-):** Rutar en par diferencial, 90Ω impedancia diferencial,
    largo máximo 50mm, igual longitud entre D+ y D-.
    Mantener plano DGND bajo todo el recorrido, sin cortes.
 
-6. **DAC8564 salidas:** Trazar por el lado analógico, alejadas del cristal y USB.
+5. **DAC8565 salidas CV:** Trazar por la zona audio/CV, alejadas del cristal y USB.
    Cada salida con condensador 100nF a AGND lo más cerca posible del pin VOUT.
+   Resistor 100Ω en serie a menos de 5mm del pin de salida.
 
-7. **AS3320 socket DIP16:** Usar socket de calidad (Mill-Max o Enplas).
-   El AS3320 puede necesitar reemplazarse — socket obligatorio.
+6. **PCM5122 zona audio:** AVDD y CPVDD deben tener sus condensadores lo más cerca del IC.
+   El pin AGND (pin 21) debe conectarse directamente al plano AGND, no via DGND.
 
-8. **Trimpots:** Orientarlos hacia el borde de la PCB o hacia un panel de acceso.
-   Documentar en el silkscreen qué ajusta cada trimpot.
+7. **Via stitching:** Añadir vias de GND en el perímetro de la PCB cada 5mm.
 
-9. **Via stitching:** Añadir vias de GND (M3 taladros) en el perímetro de la PCB cada 5mm.
-
-10. **Net classes en KiCad:**
+8. **Net classes en KiCad:**
     - `AUDIO`: 0.2mm mínimo, clearance 0.3mm
     - `CV`: 0.2mm mínimo
-    - `POWER_12V`: 1.0mm mínimo
     - `POWER_5V`: 0.5mm mínimo
+    - `POWER_3V3`: 0.5mm mínimo
     - `DIFFERENTIAL_USB`: 0.15mm + 0.15mm spacing para 90Ω
 
 ---
@@ -980,13 +1006,13 @@ evita que un rack Eurorack inyecte voltaje hacia atrás en los amplificadores de
 - [ ] ERC sin errores (solo warnings de PWR_FLAG son aceptables si se pusieron PWR_FLAG)
 - [ ] Todos los VDD de cada IC tienen condensador de decoupling en el esquemático
 - [ ] VCAP1 y VCAP2 del STM32H7 tienen 2.2µF y van a DGND (NO a VDD)
-- [ ] LDAC_n del DAC8564 está conectado a un GPIO del STM32 (NO a GND fijo)
+- [ ] LDAC del DAC8565 está conectado a un GPIO del STM32 (PB7) — flanco de SUBIDA para actualizar
+- [ ] XSMT del PCM5122 (pin 25) conectado a PC3 con pull-up 10kΩ a +3V3
 - [ ] Cristal tiene resistor serie 22Ω en OSC_IN
 - [ ] Pull-down 10kΩ en BOOT0
 - [ ] Cada encoder tiene pull-ups 10kΩ y condensadores anti-rebote 100nF
 - [ ] Polyfuse 500mA en VBUS del USB
 - [ ] USBLC6-2 en D+ y D-
-- [ ] El AS3320 tiene resistor tempco en serie con el conversor V/I de ICTL
 - [ ] Los potenciómetros van referenciados a +3V3 (NO a +5V)
 
 ### Layout (antes de Gerber)
@@ -994,12 +1020,10 @@ evita que un rack Eurorack inyecte voltaje hacia atrás en los amplificadores de
 - [ ] AGND y DGND son planos separados con único punto de unión
 - [ ] Cristal a menos de 5mm del STM32H7
 - [ ] Decoupling capacitors a menos de 0.5mm de su IC
-- [ ] Ninguna pista de audio paralela o cerca del LT1054 (charge pump)
 - [ ] Capas F.Paste activas en todos los footprints de ICs SMD (para stencil)
 - [ ] Silkscreen sin texto encima de pads
-- [ ] Thermal vias bajo LT3042 y LT3094 (pads térmicos a AGND)
-- [ ] Socket DIP16 footprint para el AS3320 (NOT soldered direct)
-- [ ] Trimpots accesibles desde arriba del PCB
+- [ ] Thermal vias bajo LT3042 (pad térmico a AGND)
+- [ ] PCM5122 AGND (pin 21) conectado directamente al plano AGND
 - [ ] Conector SWD accesible desde el exterior del chasis
 
 ### Exportación para JLCPCB
@@ -1013,8 +1037,7 @@ evita que un rack Eurorack inyecte voltaje hacia atrás en los amplificadores de
 - [ ] Resistores 5.1kΩ conectados a CC1 y CC2 del conector USB-C (NO a +5V, a GND)
 - [ ] Conector USB-C power es diferente al USB-B de MIDI — son dos conectores distintos
 - [ ] Polyfuse 2A en VBUS del USB-C de potencia
-- [ ] Verificar que LT1054 (no MAX1044) esté en el BOM para el rail negativo
-- [ ] LT3094 en el BOM — no confundir con LT3042 (diferente IC, diferente pinout)
+- [ ] LT3042 configurado para 3.3V (RSET = 33kΩ) — NO confundir con la versión de 5V
 - [ ] PCA9685: verificar dirección I2C `0x40` no colisiona con otros ICs del bus
 - [ ] Resistores 330Ω (o 150Ω para más brillo) en cada LED — calcular Vf del LED elegido
 - [ ] Pin ~OE del PCA9685 con pull-down 10kΩ a DGND (LEDs activos por defecto al encender)
@@ -1038,20 +1061,21 @@ Crear proyecto nuevo:
 ## APÉNDICE B — Orden Recomendado de Diseño en KiCad
 
 1. Crear el proyecto KiCad
-2. Agregar todos los símbolos custom que necesites (AS3320 no está en la lib estándar)
+2. Agregar símbolos custom si es necesario (PCM5122 y DAC8565 están en la lib TI de KiCad)
 3. Dibujar bloque de alimentación completo + ERC
 4. Dibujar bloque STM32H7 + cristal + SWD + decoupling completo + ERC
 5. Dibujar bloque USB + protección + USBLC6-2 + ERC
-6. Dibujar bloque PCM5242 + salida analógica + ERC
-7. Dibujar bloque DAC8564 + buffers OPA2134 + ERC
-8. Dibujar bloque AS3320 + conversores V/I + ERC
-9. Dibujar bloque THAT2180 + ERC
-10. Dibujar bloque multiplexores + pots + encoders + ERC
-11. Dibujar bloque Flash + OLED + PCA9685 + LEDs + ERC
-12. Dibujar bloque MIDI DIN + CV jacks + ERC
-13. ERC final completo → 0 errores
-14. Asignar footprints a todos los símbolos
-15. Layout PCB en orden: zonas de tierra → potencia → digital → analógico → conectores
+6. Dibujar bloque PCM5122 + filtro de salida pasivo + jacks TRS/RCA + ERC
+7. Dibujar bloque DAC8565 + resistores CV 100Ω + jacks TRS 3.5mm + ERC
+8. Dibujar bloque encoders + pots + MCP23017 + ERC
+9. Dibujar bloque Flash + OLED + PCA9685 + LEDs + ERC
+10. Dibujar bloque MIDI DIN + CV jacks + ERC
+11. ERC final completo → 0 errores
+12. Asignar footprints a todos los símbolos
+13. Layout PCB en orden: zonas de tierra → potencia → digital → audio/CV → conectores
+14. DRC → 0 errores
+15. Revisar visualmente con 3D viewer
+16. Exportar Gerbers
 16. DRC → 0 errores
 17. Revisar visualmente con 3D viewer
 18. Exportar Gerbers
@@ -1120,9 +1144,9 @@ Curso universitario completo sobre VCF/VCA/envelopes.
 
 | Video | URL | Por qué verlo |
 |---|---|---|
-| STM32 SAI – I2S Audio Output con DMA | https://www.youtube.com/watch?v=1WU5qIVRvN4 | SAI1 → PCM5242, DMA double buffer |
-| STM32 SPI con DMA | https://www.youtube.com/watch?v=t6yhF4WcExM | SPI1 → DAC8564, SPI2 → W25Q128 |
-| STM32 I2C – Master Transmit/Receive | https://www.youtube.com/watch?v=8m0RzBEhkHA | I2C bus: PCM5242 + SSD1306 + PCA9685 + MCP23017 |
+| STM32 SAI – I2S Audio Output con DMA | https://www.youtube.com/watch?v=1WU5qIVRvN4 | SAI1 → PCM5122, DMA double buffer |
+| STM32 SPI con DMA | https://www.youtube.com/watch?v=t6yhF4WcExM | SPI1 → DAC8565, SPI2 → W25Q128 |
+| STM32 I2C – Master Transmit/Receive | https://www.youtube.com/watch?v=8m0RzBEhkHA | I2C bus: PCM5122 + SSD1306 + PCA9685 + MCP23017 |
 | STM32 USB MIDI / CDC | https://www.youtube.com/watch?v=BmKe1hNs3tg | USB OTG FS class-compliant MIDI |
 | STM32 Encoder Interface (TIM quadrature) | https://www.youtube.com/watch?v=fnrqRcOUe2c | 8x EC11 en modo quadrature con TIMx |
 
@@ -1190,8 +1214,8 @@ CUANDO LLEGUEN LAS PLACAS (ensamblaje):
   11. EEVblog → SMD Soldering Tutorial
   12. Collin's Lab → SMD Soldering
 
-PARA ENTENDER LOS CIRCUITOS ANALOGICOS (cualquier momento):
-  13. Moritz Klein → DIY Moog Ladder Filter (empieza aqui)
+OPCIONAL — CONTEXTO HISTÓRICO DE SÍNTESIS ANALÓGICA:
+  13. Moritz Klein → DIY Moog Ladder Filter (para entender qué hace el SVF digital)
   14. Moritz Klein → VCO/VCF series completa
-  15. Aaron Lanterman → Georgia Tech EMS (profundidad teorica)
+  15. Aaron Lanterman → Georgia Tech EMS (profundidad teórica de síntesis)
 ```
