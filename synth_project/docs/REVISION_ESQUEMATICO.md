@@ -355,7 +355,7 @@ BOOT0 (pin 94 STM32) ───────────────────�
 
 ---
 
-### 🔴 BLOQUE F4 — USBLC6-2 ESD (protección datos USB)
+### ✅ BLOQUE F4 — USBLC6-2 ESD (protección datos USB) (COMPLETADO)
 
 **Va entre el conector USB-C y los pines PA11/PA12 del STM32.**
 
@@ -420,7 +420,7 @@ TN ──► NC                         TN ──► NC
 
 ---
 
-### 🔴 BLOQUE F6 — Jacks CV Out (4× TRS 3.5mm)
+### ✅ BLOQUE F6 — Jacks CV Out (4× TRS 3.5mm)
 
 **Las nets CV1..CV3 ya salen del DAC8565. VOUTD está NC pero puede añadirse como CV4.**
 
@@ -458,7 +458,7 @@ DAC8565 VOUTx ──[100Ω, 0402]──► J_CVx [Jack TRS 3.5mm]
 
 ---
 
-### 🟡 BLOQUE F7 — W25Q128 Flash SPI (16MB)
+### ✅ BLOQUE F7 — W25Q128 Flash SPI (16MB)
 
 **Almacena patches, wavetables y datos de secuenciador. SPI2 del STM32.**
 
