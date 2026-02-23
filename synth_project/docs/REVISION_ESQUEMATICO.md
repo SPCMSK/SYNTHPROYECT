@@ -1,29 +1,30 @@
 # Revisión del Esquemático — DigitalSynth v1.0
 **Fecha:** 22 Feb 2026 | **Revisado contra:** `05_GUIA_ESQUEMATICO.md` v2.0
+**Estado:** ✅ Errores críticos y menores CORREGIDOS — pendiente completar bloques faltantes
 
 ---
 
 ## RESUMEN EJECUTIVO
 
-| Bloque | Estado | Errores críticos |
+| Bloque | Estado | Notas |
 |---|---|---|
-| USB-C (power) | ⚠️ ERRORES | CC1/CC2 invertidos — no cargará correctamente |
-| STM32H743 | ⚠️ ERRORES | BOOT0 pull-up incorrecto, D+ pull-up externo innecesario |
-| Decoupling STM32 | ⚠️ INCOMPLETO | Faltan VCAP1/VCAP2, resistor serie cristal |
-| LDO 3.3VA (LT3042) | ✅ CORRECTO | Solo detalle menor en ILIM |
-| LDO 5V→3.3V (AMS1117) | ✅ ACEPTABLE | Cambio de ADP3335 → AMS1117 (OK) |
-| PCM5122 (DAC audio) | ⚠️ ERROR | XSMT flotante — DAC estará en mute permanente |
-| DAC8565 (CV) | ⚠️ OBSERVACIONES | Falta fuente +5VA, naming VCF/VCA confuso |
+| USB-C (power) | ✅ CORREGIDO | CC1/CC2 → GND ✓, polyfuse único 2A ✓ |
+| STM32H743 | ✅ CORREGIDO | BOOT0 con SW_BOOT SMD + pull-down ✓, R2 eliminado ✓ |
+| Decoupling STM32 | ✅ CORREGIDO | VCAP1/VCAP2 añadidos ✓, 22Ω cristal ✓ |
+| LDO 3.3VA (LT3042) | ✅ CORRECTO | RILIM 360kΩ añadido ✓ |
+| LDO 5V→3.3V (AMS1117) | ✅ ACEPTABLE | Bypass cerámicos 100nF añadidos ✓ |
+| PCM5122 (DAC audio) | ✅ CORREGIDO | XSMT → +3.3VA ✓ |
+| DAC8565 (CV) | ✅ CORREGIDO | Bloque +5VA añadido ✓, nets renombradas a CV1-4 ✓ |
 
-**Bloques diseñados: 7 / ~18 totales**
-
----
-
-## ERRORES CRÍTICOS (deben corregirse antes de fabricar)
+**Bloques corregidos: 7 / 7 ✅ — Bloques faltantes por diseñar: 11 / ~18**
 
 ---
 
-### ❌ ERROR 1 — USB-C: CC1 y CC2 conectados a VBUS (FATAL)
+## ERRORES CRÍTICOS — ✅ TODOS CORREGIDOS
+
+---
+
+### ✅ ERROR 1 — USB-C: CC1 y CC2 conectados a VBUS (CORREGIDO)
 
 **Imagen:** `USBC.png`
 
@@ -45,11 +46,11 @@ Los resistores CC son **pull-DOWN a GND** (Rd = 5.1kΩ). Esto le dice al cargado
 Con pull-UP a VBUS, el cargador verá los CC como señal de HOST/DFP — puede no entregar
 corriente, rechazar la conexión, o en el peor caso dañar el cargador.
 
-**Fix en KiCad:** Girar/rerouter R3 y R4 para que el otro extremo vaya a GND, no a 5V_USB.
+**Fix aplicado:** R3 y R4 redirigidos a GND. ✅
 
 ---
 
-### ❌ ERROR 2 — USB-C: Dos polyfuses en paralelo (F1 + F2)
+### ✅ ERROR 2 — USB-C: Dos polyfuses en paralelo (CORREGIDO)
 
 **Imagen:** `USBC.png`
 
@@ -59,47 +60,58 @@ corriente, rechazar la conexión, o en el peor caso dañar el cargador.
 Un fallo de cortocircuito real no abrirá el fusible hasta 4A — demasiado tarde para proteger
 el circuito.
 
-**Fix:** Eliminar uno de los dos polyfuses. Usar solo **1× polyfuse 2A** (RXEF020 o similar).
+**Fix aplicado:** F2 eliminado. Queda un único polyfuse 2A. ✅
 
 ---
 
-### ❌ ERROR 3 — STM32: BOOT0 puede estar en estado incorrecto
+### ✅ ERROR 3 — STM32: BOOT0 con switch SMD (CORREGIDO)
 
 **Imagen:** `STM32.png`
 
-**Lo que se ve:** R1 en pin 94 (BOOT0) con flecha hacia +3.3V.
+**Buenas noticias:** No necesitas ST-Link ni ningún programador externo.
+El STM32H743 tiene un **bootloader DFU en ROM** que activa el USB-C que ya tienes.
+Flasheas con **STM32CubeProgrammer** (gratis, de ST) directamente por USB.
 
-Si R1 es un pull-UP a +3.3V:
-- BOOT0 = HIGH al encender → **STM32 arranca en modo bootloader DFU**, no en flash.
-- El firmware compilado nunca ejecuta.
+**Solución implementada:** Switch SMD (SW_BOOT) en lugar de jumper.
 
-**Lo que debe ser:**
+**Circuito final:**
 ```
-BOOT0 (pin 94) → R1 (10kΩ) → GND   ← pull-DOWN = boot desde Flash
+BOOT0 (pin 94) ──[10kΩ R_BOOT, 0402]──► GND    ← pull-down normal = arranca firmware
+BOOT0 (pin 94) ──────────────────────► SW_BOOT (SPST, SMD) ──► +3.3V
 ```
-El 10kΩ a GND es suficiente. Si en el futuro necesitas entrar a DFU, se conecta
-temporalmente a 3.3V (o via jumper de 2 pines).
 
-**Fix:** Confirmar en KiCad que R1 va a GND, no a +3.3V.
+**Switch recomendado:** Alps SKQGAF010 (SMD, 4 pines, 100mΩ, footprint 3.9×2.9mm)
+or cualquier SPST SMD de 3.3V/200mA. Uno NO-momentáneo es más cómodo (no hay que mantenerlo pulsado).
+
+**Cómo programar sin ST-Link:**
+1. Activa SW_BOOT (BOOT0 = HIGH)
+2. Conecta USB-C al PC
+3. Abre **STM32CubeProgrammer** → selecciona USB → Connect
+4. Carga tu `.hex` o `.elf` → Download
+5. Desactiva SW_BOOT (BOOT0 = LOW)
+6. Pulsa Reset → el STM32 arranca con tu firmware
+
+**Fix aplicado:** R1 pull-up eliminado. R_BOOT 10kΩ pull-down + SW_BOOT SMD añadido. ✅
 
 ---
 
-### ❌ ERROR 4 — STM32: Resistor externo 1K5 en USB_DP (PA12)
+### ✅ ERROR 4 — STM32: Resistor externo 1K5 en USB_DP (CORREGIDO)
 
 **Imagen:** `STM32.png`
 
 **Lo que tiene:** R2 (1K5) entre PA12/USB_D+ y +3.3V.
 
-**Problema:** El STM32H743 OTG_FS tiene **pull-up interno de 1.5kΩ en D+** habilitado
-por software. Colocar además un 1.5kΩ externo resulta en 750Ω efectivos (paralelo), lo que
-viola la especificación USB FS (debe ser 1.5kΩ ±5%). El host verá el dispositivo
-como defectuoso o no enumerará.
+**Problema:** El STM32H743 tiene **pull-up interno de 1.5kΩ en D+** que activa
+automáticamente tanto en modo DFU (bootloader ROM) como en modo USB MIDI normal.
+Colocar además un 1.5kΩ externo resulta en **750Ω efectivos** (paralelo),
+violando la spec USB FS (debe ser 1.5kΩ ±5%). El PC verá el dispositivo como
+defectuoso o no enumerará — esto afecta tanto DFU como MIDI.
 
-**Fix:** **Eliminar R2 completamente.** El pull-up lo gestiona CubeMX/HAL automáticamente.
+**Fix aplicado:** R2 eliminado del esquemático. ✅
 
 ---
 
-### ❌ ERROR 5 — PCM5122: Pin XSMT flotante — salida en mute permanente
+### ✅ ERROR 5 — PCM5122: Pin XSMT (CORREGIDO)
 
 **Imagen:** `DAC AUDIO.png`
 
@@ -115,11 +127,11 @@ XSMT (pin 25) → [10kΩ pull-up] → +3.3VA
 ```
 Si no se necesita control de mute desde GPIO, simplemente conectar directamente a +3.3VA.
 
-**Fix:** Conectar XSMT a +3.3VA (con o sin pull-up + GPIO según se prefiera).
+**Fix aplicado:** XSMT conectado a +3.3VA. ✅
 
 ---
 
-### ❌ ERROR 6 — Fuente +5VA no definida en el esquemático
+### ✅ ERROR 6 — Fuente +5VA (CORREGIDO)
 
 **Imagen:** `DAC.png` (DAC8565, pin AVDD = "+5VA")
 
@@ -134,13 +146,15 @@ esquemático que genere `+5VA`. El LT3042 genera `+3.3VA`, y el AMS1117 genera `
 La fuente `+5VA` es simplemente 5V_BUS filtrado con ferrite — **no necesita LDO**.
 El DAC8565 en salida CV tiene ruido no crítico, el ferrite es suficiente.
 
----
-
-## ERRORES MENORES (corregir antes del layout)
+**Fix aplicado:** Bloque ferrite + caps +5VA añadido. Nets CV1_OUT/CV2_OUT/CV3_OUT/CV4_OUT renombradas. ✅
 
 ---
 
-### ⚠️ MENOR 1 — Decoupling STM32: Faltan VCAP1 y VCAP2
+## ERRORES MENORES — ✅ TODOS CORREGIDOS
+
+---
+
+### ✅ MENOR 1 — Decoupling STM32: VCAP1 y VCAP2 (CORREGIDO)
 
 **Imagen:** `DECOUPLING STM.png`
 
@@ -152,12 +166,11 @@ VCAP1 (pin 48) → C_VCAP1 (2.2µF ceramic, X5R) → GND
 VCAP2 (pin 73) → C_VCAP2 (2.2µF ceramic, X5R) → GND
 ```
 
-**⛔ CRÍTICO:** Sin estos condensadores el STM32H743 puede no arrancar o tener
-comportamiento inestable. Están documentados como obligatorios en el datasheet de STM.
+**Fix aplicado:** C_VCAP1 y C_VCAP2 (2.2µF X5R) añadidos en bloque decoupling. ✅
 
 ---
 
-### ⚠️ MENOR 2 — Cristal: Falta resistor serie en OSC_IN
+### ✅ MENOR 2 — Cristal: Resistor serie 22Ω (CORREGIDO)
 
 **Imagen:** `STM32.png` (cristal Y1 25MHz)
 
@@ -170,9 +183,11 @@ arranque.
 PA oscilador → [22Ω] → OSC_IN del cristal
 ```
 
+**Fix aplicado:** Resistor 22Ω serie en OSC_IN añadido. ✅
+
 ---
 
-### ⚠️ MENOR 3 — Decoupling STM32: C_DEC_VDD insuficiente
+### ✅ MENOR 3 — Decoupling STM32: Condensadores VDD (CORREGIDO)
 
 **Imagen:** `DECOUPLING STM.png`
 
@@ -183,9 +198,11 @@ Distribución sugerida:
 - **VDD (×11):** 11× 100nF + 2× 10µF (bulk)
 - **VDDA (×1):** 1× 1µF + 1× 10nF (ya tienes esto con FB1 ✓)
 
+**Fix aplicado:** Condensadores 100nF distribuidos por los 11 pines VDD. ✅
+
 ---
 
-### ⚠️ MENOR 4 — LT3042: Pin ILIM flotante
+### ✅ MENOR 4 — LT3042: Pin ILIM (CORREGIDO)
 
 **Imagen:** `LDO 3.3 VA.png`
 
@@ -196,9 +213,11 @@ tiene comportamiento indefinido según el datasheet.
 - `ILIM → [360kΩ] → GND` → límite de ~200mA ← **recomendado**
 - `ILIM → IN` → deshabilita límite de corriente (máximo hardware)
 
+**Fix aplicado:** RILIM = 360kΩ a GND añadido. ✅
+
 ---
 
-### ⚠️ MENOR 5 — Naming inconsistente de GND analógico
+### ✅ MENOR 5 — Naming GND analógico (CORREGIDO)
 
 A lo largo del esquemático se usan **tres nombres distintos para el mismo plano analógico:**
 - `AGND` (en bloque PCM5122)
@@ -208,12 +227,11 @@ A lo largo del esquemático se usan **tres nombres distintos para el mismo plano
 En KiCad estos son **nets distintos** si no están conectados. Si AGND ≠ GNDA, el PCM5122
 y el filtro de salida no comparten plano de tierra → distorsión y ruido.
 
-**Fix:** Unificar todo a `GNDA` para el analógico y `GND` para el digital. Verificar con
-el ERC que no haya nets aisladas.
+**Fix aplicado:** Todas las nets analógicas unificadas a `GNDA`. Verificar con ERC de KiCad que no queden nets `AGND` huérfanas. ✅
 
 ---
 
-### ⚠️ MENOR 6 — DAC8565: Naming de salidas VCF/VCA confuso
+### ✅ MENOR 6 — DAC8565: Naming de salidas (CORREGIDO)
 
 **Imagen:** `DAC.png`
 
@@ -227,9 +245,11 @@ existe cadena analógica VCF/VCA**. Los nombres correctos son salidas CV externa
 | PITCH/CV | CV3_OUT | Jack CV 3 (Mod/Env) |
 | (VOUTD/NC) | CV4_OUT | Jack CV 4 (libre) |
 
+**Fix aplicado:** Nets renombradas a CV1_OUT–CV4_OUT. ✅
+
 ---
 
-### ⚠️ MENOR 7 — PCM5122: Condensadores CAPP/CAPM
+### ✅ MENOR 7 — PCM5122: Condensadores CAPP/CAPM (CORREGIDO)
 
 **Imagen:** `DAC AUDIO.png`
 
@@ -237,9 +257,11 @@ C32 (2.2µF) entre CAPP (pin 2) y CAPM (pin 4) — el `+` del electrolítico deb
 CAPP. Verificar la polaridad en el symbol de KiCad. Si está invertida, el condensador se
 polariza al revés durante operación.
 
+**Fix aplicado:** Polaridad de C32 verificada y corregida (+ en CAPP). ✅
+
 ---
 
-### ⚠️ MENOR 8 — AMS1117: Faltan bypass cerámicos
+### ✅ MENOR 8 — AMS1117: Bypass cerámicos (CORREGIDO)
 
 **Imagen:** `LDO 5 TO 3.3.png`
 
@@ -250,6 +272,8 @@ también condensadores cerámicos de bypass para estabilidad:
 Entrada: 100nF cerámico en paralelo con C17
 Salida:  100nF cerámico en paralelo con C18
 ```
+
+**Fix aplicado:** 100nF cerámico añadido en entrada y salida del AMS1117. ✅
 
 ---
 
@@ -310,19 +334,21 @@ Pin 73 (VCAP2) ──► C_VCAP2 [2.2µF, cerámico X5R, 0805] ──► GND
 
 ---
 
-### 🔴 BLOQUE F3 — BOOT0 + Header DFU (programación por USB sin ST-Link)
+### 🔴 BLOQUE F3 — BOOT0 + Switch SMD DFU (programación por USB sin ST-Link)
 
-**Reemplaza el R1 pull-up actual. Permite flashear firmware por USB-C.**
+**Solución implementada con switch SMD en lugar de jumper.**
 
 ```
-+3.3V ──┐
-        JP1 [Header 2 pines, 2.54mm] ──┬── BOOT0 (pin 94 STM32)
-                                        └── R_BOOT [10kΩ, 0402] ──► GND
+BOOT0 (pin 94 STM32) ──[R_BOOT, 10kΩ, 0402]──► GND
+BOOT0 (pin 94 STM32) ──────────────────────► SW_BOOT [Switch SPST SMD] ──► +3.3V
 ```
 
-**Cómo usar JP1:**
-- Sin jumper (normal): BOOT0 = LOW → arranca firmware desde Flash
-- Con jumper puesto: BOOT0 = HIGH → arranca DFU → flashear con STM32CubeProgrammer por USB
+**Switch recomendado:** Alps SKQGAF010 (SMD SPST, 3.9×2.9mm, panel ON/OFF)
+→ Usar un switch NO-momentáneo (toggle/sliding) para no tener que mantenerlo pulsado durante la carga.
+
+**Cómo usar SW_BOOT:**
+- Switch OFF (normal): BOOT0 = LOW → arranca firmware desde Flash
+- Switch ON: BOOT0 = HIGH → arranca DFU → flashear con STM32CubeProgrammer por USB
 
 ---
 
@@ -613,30 +639,35 @@ USBLC6-2SC6 (SOT-23-6) — protección ESD datos:
 
 ---
 
-## PLAN DE CORRECCIONES — ORDEN SUGERIDO
+## PLAN DE CORRECCIONES — ESTADO ACTUAL
 
 ```
-ANTES DE CONTINUAR DISEÑANDO:
-  1. Corregir CC1/CC2 en USB-C (pull-down a GND, no pull-up) — CRÍTICO
-  2. Cambiar BOOT0: pull-down 10kΩ a GND + header JP1 para DFU — CRÍTICO
-  3. Conectar XSMT del PCM5122 a +3.3VA o GPIO — CRÍTICO
-  4. Añadir bloque +5VA (ferrite desde 5V_BUS) — CRÍTICO
-  5. Eliminar R2 (1K5) en USB_DP del STM32
-  6. Eliminar uno de los dos polyfuses USB-C
-  7. Añadir VCAP1 y VCAP2 (2.2µF)
-  8. Añadir resistor serie 22Ω en OSC_IN del cristal
-  9. Unificar naming AGND → GNDA en bloque PCM5122
-  10. Añadir RILIM (360kΩ a GND) en LT3042
+CORRECCIONES APLICADAS ✅:
+  1. ✅ CC1/CC2 en USB-C → GND (pull-down)
+  2. ✅ BOOT0: pull-down 10kΩ + SW_BOOT SMD (en lugar de jumper)
+  3. ✅ XSMT del PCM5122 → +3.3VA
+  4. ✅ Bloque +5VA: ferrite BLM21 desde 5V_BUS + 4.7µF + 100nF a GNDA
+  5. ✅ R2 (1K5) en USB_DP eliminado
+  6. ✅ F2 (polyfuse duplicado) eliminado — queda 1× polyfuse 2A
+  7. ✅ VCAP1 y VCAP2 (2.2µF X5R) añadidos
+  8. ✅ Resistor serie 22Ω en OSC_IN del cristal
+  9. ✅ Naming AGND → GNDA unificado
+  10. ✅ RILIM 360kΩ a GND en LT3042
 
-DESPUÉS (bloques nuevos):
-  11. SWD connector
-  12. USBLC6-2 en USB datos
-  13. Jacks audio + CV con protección
-  14. Flash W25Q128
-  15. OLED + MCP23017
-  16. Encoders + potenciómetros
-  17. PCA9685 + LEDs
-  18. MIDI DIN IN/OUT + USB-B MIDI
+BLOQUES PENDIENTES (diseñar en KiCad):
+  11. ○ F1 — VCAP conexiones en bloque decoupling
+  12. ○ F4 — USBLC6-2 ESD en USB datos
+  13. ○ F5 — Jacks audio TRS 6.35mm + RCA
+  14. ○ F6 — Jacks CV 4× TRS 3.5mm + BAT54S
+  15. ○ F7 — Flash W25Q128 (SPI2)
+  16. ○ F8 — OLED SSD1306 (I2C)
+  17. ○ F9 — MCP23017 switches (I2C)
+  18. ○ F10 — Encoders EC11 ×8
+  19. ○ F11 — Potenciómetros RV3/RV4
+  20. ○ F12 — PCA9685 + LEDs ×16
+  21. ○ F13 — MIDI DIN IN (6N137)
+  22. ○ F14 — MIDI DIN OUT
+  23. ○ F15 — USB-B MIDI + USBLC6-2
 ```
 
 ---
@@ -645,9 +676,9 @@ DESPUÉS (bloques nuevos):
 
 **Sobre programación sin ST-Link — DFU por USB:**
 No necesitas ningún programador externo. El STM32H743 tiene bootloader DFU en ROM.
-Circuito: pull-down 10kΩ en BOOT0 + header JP1 de 2 pines a +3.3V.
-Software: STM32CubeProgrammer (gratis) → detecto el chip via USB sin drivers especiales.
-Flujo: coloca jumper JP1 → conecta USB → flashea → quita jumper → reset → funciona.
+Circuito implementado: pull-down 10kΩ en BOOT0 + SW_BOOT SMD (Alps SKQGAF010 o equivalente).
+Software: STM32CubeProgrammer (gratis) → detecta el chip via USB sin drivers especiales.
+Flujo: activa SW_BOOT → conecta USB → flashea → desactiva SW_BOOT → reset → funciona.
 
 
 El AMS1117-3.3 es un cambio aceptable respecto al ADP3335 especificado en la guía.
