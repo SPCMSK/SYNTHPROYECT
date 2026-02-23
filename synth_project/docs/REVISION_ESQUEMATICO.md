@@ -1,304 +1,194 @@
 # Revisión del Esquemático — DigitalSynth v1.0
-**Fecha:** 22 Feb 2026 | **Revisado contra:** `05_GUIA_ESQUEMATICO.md` v2.0
-**Estado:** ✅ Errores críticos y menores CORREGIDOS — pendiente completar bloques faltantes
+**Fecha:** 23 Feb 2026 | **Revisado contra:** `05_GUIA_ESQUEMATICO.md` v2.0
+**Estado:** ✅ Bloques base completados — pendiente completar periféricos
 
 ---
 
 ## RESUMEN EJECUTIVO
 
-| Bloque | Estado | Notas |
-|---|---|---|
-| USB-C (power) | ✅ CORREGIDO | CC1/CC2 → GND ✓, polyfuse único 2A ✓ |
-| STM32H743 | ✅ CORREGIDO | BOOT0 con SW_BOOT SMD + pull-down ✓, R2 eliminado ✓ |
-| Decoupling STM32 | ✅ CORREGIDO | VCAP1/VCAP2 añadidos ✓, 22Ω cristal ✓ |
-| LDO 3.3VA (LT3042) | ✅ CORRECTO | RILIM 360kΩ añadido ✓ |
-| LDO 5V→3.3V (AMS1117) | ✅ ACEPTABLE | Bypass cerámicos 100nF añadidos ✓ |
-| PCM5122 (DAC audio) | ✅ CORREGIDO | XSMT → +3.3VA ✓ |
-| DAC8565 (CV) | ✅ CORREGIDO | Bloque +5VA añadido ✓, nets renombradas a CV1-4 ✓ |
-
-**Bloques corregidos: 7 / 7 ✅ — Bloques faltantes por diseñar: 11 / ~18**
-
----
-
-## ERRORES CRÍTICOS — ✅ TODOS CORREGIDOS
-
----
-
-### ✅ ERROR 1 — USB-C: CC1 y CC2 conectados a VBUS (CORREGIDO)
-
-**Imagen:** `USBC.png`
-
-**Lo que tiene:**
-```
-5V_USB → R3 (5K1) → CC2 (B5)
-5V_USB → R4 (5K1) → CC1 (A5)
-```
-
-**Lo que debe ser:**
-```
-CC1 (A5) → R4 (5K1) → GND
-CC2 (B5) → R3 (5K1) → GND
-```
-
-**Por qué es crítico:**
-Los resistores CC son **pull-DOWN a GND** (Rd = 5.1kΩ). Esto le dice al cargador USB-C:
-*"soy un dispositivo, dame 5V/1.5A"*.
-Con pull-UP a VBUS, el cargador verá los CC como señal de HOST/DFP — puede no entregar
-corriente, rechazar la conexión, o en el peor caso dañar el cargador.
-
-**Fix aplicado:** R3 y R4 redirigidos a GND. ✅
-
----
-
-### ✅ ERROR 2 — USB-C: Dos polyfuses en paralelo (CORREGIDO)
-
-**Imagen:** `USBC.png`
-
-**Lo que tiene:** F1 (2A) y F2 (2A) en paralelo → dos paths de VBUS a 5V_BUS.
-
-**Problema:** En paralelo suman → fusible efectivo de 4A. El diseño solo consume ~400mA.
-Un fallo de cortocircuito real no abrirá el fusible hasta 4A — demasiado tarde para proteger
-el circuito.
-
-**Fix aplicado:** F2 eliminado. Queda un único polyfuse 2A. ✅
-
----
-
-### ✅ ERROR 3 — STM32: BOOT0 con switch SMD (CORREGIDO)
-
-**Imagen:** `STM32.png`
-
-**Buenas noticias:** No necesitas ST-Link ni ningún programador externo.
-El STM32H743 tiene un **bootloader DFU en ROM** que activa el USB-C que ya tienes.
-Flasheas con **STM32CubeProgrammer** (gratis, de ST) directamente por USB.
-
-**Solución implementada:** Switch SMD (SW_BOOT) en lugar de jumper.
-
-**Circuito final:**
-```
-BOOT0 (pin 94) ──[10kΩ R_BOOT, 0402]──► GND    ← pull-down normal = arranca firmware
-BOOT0 (pin 94) ──────────────────────► SW_BOOT (SPST, SMD) ──► +3.3V
-```
-
-**Switch recomendado:** Alps SKQGAF010 (SMD, 4 pines, 100mΩ, footprint 3.9×2.9mm)
-or cualquier SPST SMD de 3.3V/200mA. Uno NO-momentáneo es más cómodo (no hay que mantenerlo pulsado).
-
-**Cómo programar sin ST-Link:**
-1. Activa SW_BOOT (BOOT0 = HIGH)
-2. Conecta USB-C al PC
-3. Abre **STM32CubeProgrammer** → selecciona USB → Connect
-4. Carga tu `.hex` o `.elf` → Download
-5. Desactiva SW_BOOT (BOOT0 = LOW)
-6. Pulsa Reset → el STM32 arranca con tu firmware
-
-**Fix aplicado:** R1 pull-up eliminado. R_BOOT 10kΩ pull-down + SW_BOOT SMD añadido. ✅
-
----
-
-### ✅ ERROR 4 — STM32: Resistor externo 1K5 en USB_DP (CORREGIDO)
-
-**Imagen:** `STM32.png`
-
-**Lo que tiene:** R2 (1K5) entre PA12/USB_D+ y +3.3V.
-
-**Problema:** El STM32H743 tiene **pull-up interno de 1.5kΩ en D+** que activa
-automáticamente tanto en modo DFU (bootloader ROM) como en modo USB MIDI normal.
-Colocar además un 1.5kΩ externo resulta en **750Ω efectivos** (paralelo),
-violando la spec USB FS (debe ser 1.5kΩ ±5%). El PC verá el dispositivo como
-defectuoso o no enumerará — esto afecta tanto DFU como MIDI.
-
-**Fix aplicado:** R2 eliminado del esquemático. ✅
-
----
-
-### ✅ ERROR 5 — PCM5122: Pin XSMT (CORREGIDO)
-
-**Imagen:** `DAC AUDIO.png`
-
-**Lo que tiene en el esquemático actual:** XSMT (pin 25) → `PC3_GPIO` ✓
-
-**Esto es correcto y mejor que +3.3VA fijo** — permite control de mute por firmware.
-
-⚠️ **TRAMPA CRÍTICA DE FIRMWARE:** Si PC3 arranca en LOW (estado por defecto de los GPIO
-del STM32 al encender), el DAC estará **muteado hasta que el firmware lo desactive**.
-Esto puede confundirse con un fallo de audio al hacer pruebas iniciales.
-
-**En CubeMX/código de inicialización, OBLIGATORIO:**
-```c
-// Inmediatamente después de init, antes de reproducir audio:
-HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);  // XSMT = HIGH = unmute
-```
-O configurar PC3 como output con **valor inicial HIGH** en CubeMX (Output level: High).
-
-**Fix aplicado:** XSMT conectado a PC3_GPIO ✅ — añadir inicialización HIGH en firmware.
-
----
-
-### ✅ ERROR 6 — Fuente +5VA (CORREGIDO)
-
-**Imagen:** `DAC.png` (DAC8565, pin AVDD = "+5VA")
-
-**Problema:** El DAC8565 usa la net `+5VA` en su AVDD, pero no existe ningún bloque en el
-esquemático que genere `+5VA`. El LT3042 genera `+3.3VA`, y el AMS1117 genera `+3.3V`.
-
-**Lo que debe existir (bloque faltante):**
-```
-5V_BUS → [Ferrite 600Ω@100MHz] → +5VA (para DAC8565 AVDD únicamente)
-                                     + C (100nF + 4.7µF a GNDA)
-```
-La fuente `+5VA` es simplemente 5V_BUS filtrado con ferrite — **no necesita LDO**.
-El DAC8565 en salida CV tiene ruido no crítico, el ferrite es suficiente.
-
-**Fix aplicado:** Bloque ferrite + caps +5VA añadido. Nets CV1_OUT/CV2_OUT/CV3_OUT/CV4_OUT renombradas. ✅
-
----
-
-## ERRORES MENORES — ✅ TODOS CORREGIDOS
-
----
-
-### ✅ MENOR 1 — Decoupling STM32: VCAP1 y VCAP2 (CORREGIDO)
-
-**Imagen:** `DECOUPLING STM.png`
-
-Los pines VCAP1 (pin 48) y VCAP2 (pin 73) del STM32H743 **no aparecen en el bloque de
-decoupling**. Estos pines son para el regulador interno del core a 1.2V y requieren:
-
-```
-VCAP1 (pin 48) → C_VCAP1 (2.2µF ceramic, X5R) → GND
-VCAP2 (pin 73) → C_VCAP2 (2.2µF ceramic, X5R) → GND
-```
-
-**Fix aplicado:** C_VCAP1 y C_VCAP2 (2.2µF X5R) añadidos en bloque decoupling. ✅
-
----
-
-### ✅ MENOR 2 — Cristal: Resistor serie 22Ω (CORREGIDO)
-
-**Imagen:** `STM32.png` (cristal Y1 25MHz)
-
-La guía especifica un resistor de 22Ω en serie en OSC_IN (HSE_IN, pin 12). Este resistor
-limita la corriente que fluye por el cristal y previene sobreoscilación en cristales de baja
-frecuencia relativa. Sin él el cristal puede oscilar en armónicos o tener problemas de
-arranque.
-
-```
-PA oscilador → [22Ω] → OSC_IN del cristal
-```
-
-**Fix aplicado:** Resistor 22Ω serie en OSC_IN añadido. ✅
-
----
-
-### ✅ MENOR 3 — Decoupling STM32: Condensadores VDD (CORREGIDO)
-
-**Imagen:** `DECOUPLING STM.png`
-
-El STM32H743VIT tiene **11 pines VDD separados**. El bloque actual tiene 7 condensadores
-(1× 10µF + 6× 100nF). Recomendado por ST: un condensador 100nF por pin VDD físico.
-
-Distribución sugerida:
-- **VDD (×11):** 11× 100nF + 2× 10µF (bulk)
-- **VDDA (×1):** 1× 1µF + 1× 10nF (ya tienes esto con FB1 ✓)
-
-**Fix aplicado:** Condensadores 100nF distribuidos por los 11 pines VDD. ✅
-
----
-
-### ✅ MENOR 4 — LT3042: Pin ILIM (CORREGIDO)
-
-**Imagen:** `LDO 3.3 VA.png`
-
-El pin ILIM (pin 5) parece no estar conectado (círculo abierto). En el LT3042, ILIM flotante
-tiene comportamiento indefinido según el datasheet.
-
-**Opciones:**
-- `ILIM → [360kΩ] → GND` → límite de ~200mA ← **recomendado**
-- `ILIM → IN` → deshabilita límite de corriente (máximo hardware)
-
-**Fix aplicado:** RILIM = 360kΩ a GND añadido. ✅
-
----
-
-### ✅ MENOR 5 — Naming GND analógico (CORREGIDO)
-
-A lo largo del esquemático se usan **tres nombres distintos para el mismo plano analógico:**
-- `AGND` (en bloque PCM5122)
-- `GNDA` (en bloques DAC8565 y filtros de salida)
-- `GND` (en LT3042, AMS1117, y algún bloque digital)
-
-En KiCad estos son **nets distintos** si no están conectados. Si AGND ≠ GNDA, el PCM5122
-y el filtro de salida no comparten plano de tierra → distorsión y ruido.
-
-**Fix aplicado:** Todas las nets analógicas unificadas a `GNDA`. Verificar con ERC de KiCad que no queden nets `AGND` huérfanas. ✅
-
----
-
-### ✅ MENOR 6 — DAC8565: Naming de salidas (CORREGIDO)
-
-**Imagen:** `DAC.png`
-
-Las salidas del DAC8565 se llaman `VCF` y `VCA`, pero en la arquitectura digital v2.0 **no
-existe cadena analógica VCF/VCA**. Los nombres correctos son salidas CV externas:
-
-| Actual | Correcto | Destino |
-|---|---|---|
-| VCF | CV1_OUT | Jack CV 1 (Pitch voz 1) |
-| VCA | CV2_OUT | Jack CV 2 (Pitch voz 2) |
-| PITCH/CV | CV3_OUT | Jack CV 3 (Mod/Env) |
-| (VOUTD/NC) | CV4_OUT | Jack CV 4 (libre) |
-
-**Fix aplicado:** Nets renombradas a CV1_OUT–CV4_OUT. ✅
-
----
-
-### ✅ MENOR 7 — PCM5122: Condensadores CAPP/CAPM (CORREGIDO)
-
-**Imagen:** `DAC AUDIO.png`
-
-C32 (2.2µF) entre CAPP (pin 2) y CAPM (pin 4) — el `+` del electrolítico debe estar en
-CAPP. Verificar la polaridad en el symbol de KiCad. Si está invertida, el condensador se
-polariza al revés durante operación.
-
-**Fix aplicado:** Polaridad de C32 verificada y corregida (+ en CAPP). ✅
-
----
-
-### ✅ MENOR 8 — AMS1117: Bypass cerámicos (CORREGIDO)
-
-**Imagen:** `LDO 5 TO 3.3.png`
-
-AMS1117 solo tiene C17/C18 (22µF, probablemente electrolíticos). El AMS1117 requiere
-también condensadores cerámicos de bypass para estabilidad:
-
-```
-Entrada: 100nF cerámico en paralelo con C17
-Salida:  100nF cerámico en paralelo con C18
-```
-
-**Fix aplicado:** 100nF cerámico añadido en entrada y salida del AMS1117. ✅
-
----
-
-## LO QUE ESTÁ CORRECTO ✅
-
-| Bloque | Qué está bien |
+| Bloque | Estado |
 |---|---|
-| **LT3042** | RSET = 33.2kΩ → Vout = 3.3V exacto ✓, C_SET (0.47µF) ✓, ferrite en entrada ✓ |
-| **PCM5122 alimentación** | AVDD y CPVDD → +3.3VA (correcto para v2.0, no +5V) ✓ |
-| **PCM5122 I2S** | SCK/BCK/LRCK/DIN conectados con nets correctas ✓ |
-| **PCM5122 salida** | 470Ω + 2.2nF + 100Ω bifurcación a PLUG y RCA ✓ |
-| **PCM5122 modo** | MODE1/MODE2 a +3.3VA = I2S slave ✓ |
-| **DAC8565 SPI** | PA5/PA7/PB6/PB7 correctos para SCLK/DIN/SYNC/LDAC ✓ |
-| **DAC8565 IOVDD** | +3.3V (digital) separado de AVDD (+5VA) ✓ |
-| **DAC8565 ENABLE/RSTSEL** | Ambos a GND (activo LOW, siempre habilitado) ✓ |
-| **DAC8565 Vref** | VREFH/VREFOUT con 100nF + 10µF ✓ (referencia interna 2.5V) |
-| **DAC8565 RST** | Pull-up 10kΩ a +3.3V + GPIO PC4 para reset controlado ✓ |
-| **Cristal** | 25MHz, 14pF carga, conectado a HSE_IN/HSE_OUT ✓ |
-| **USB-C datos** | D+/D- con nets USB_D+ y USB_D- ✓ |
-| **USB-C GND** | Pin GND a tierra ✓ |
-| **Decoupling VDDA** | Ferrite + 10nF + 1µF + 1µF para VDDA del STM32 ✓ |
-| **AMS1117** | Diagrama correcto, rutas de alimentación bien trazadas ✓ |
+| USB-C (power) | ✅ Completado |
+| STM32H743 + Decoupling | ✅ Completado |
+| +5VA ferrite (DAC8565) | ✅ Completado |
+| LDO 3.3VA (LT3042) | ✅ Completado |
+| LDO 3.3V (AMS1117) | ✅ Completado |
+| PCM5122 audio DAC | ✅ Completado |
+| DAC8565 CV | ✅ Completado |
+| Jacks audio (F5) | ✅ Completado |
+| MCP23017 + Cherry MX ×16 (F9) | ✅ Completado |
+| USBLC6-2 ESD USB (F4) | ✅ Completado |
+| Jacks CV 4× TRS (F6) | 🔴 Pendiente |
+| W25Q128 Flash SPI (F7) | ✅ Completado |
+| SSD1306 OLED (F8) | 🟡 Pendiente |
+| SK6812 RGB LEDs ×16 (F12) | 🟡 Pendiente |
+| Encoders EC11 ×8 (F10) | 🟡 Pendiente |
+| Potenciómetros RV3/RV4 (F11) | 🟡 Pendiente |
+| MIDI DIN IN/OUT (F13/F14) | 🟢 Pendiente |
+| USB-B MIDI (F15) | 🟢 Pendiente |
+
+**Completados: 11 bloques ✅ — Pendientes: 7 bloques**
+
+---
+
+## BLOQUES COMPLETADOS ✅
+
+> Lista compacta. Estos bloques están diseñados y verificados — no requieren más cambios.
+
+- ✅ **USB-C power** — CC1/CC2→GND (pull-down 5K1), polyfuse único 2A, VBUS→5V_BUS
+- ✅ **STM32H743** — BOOT0 pull-down 10kΩ + SW1 Nidec CAS-120A1 no-momentáneo, R2 eliminado, cristal 25MHz + R_serie 22Ω
+- ✅ **Decoupling STM32** — VCAP1/VCAP2 (C19/C20 2.2µF X5R), 6×100nF + 1×10µF VDD, VDDA ferrite + 10nF + 1µF + 1µF
+- ✅ **+5VA ferrite** — FB4 600Ω@100MHz + C14 100nF + C47 4.7µF a GNDA
+- ✅ **LT3042 3.3VA** — RSET=33.2kΩ, C_SET 0.47µF, RILIM 360kΩ, ferrite en entrada
+- ✅ **AMS1117 3.3V** — bulk electrolítico + bypass 100nF en entrada y salida
+- ✅ **PCM5122** — XSMT→PC3_GPIO (init HIGH obligatorio en firmware), AVDD/CPVDD→+3.3VA, I2S correcto, filtro 470Ω+2.2nF+100Ω
+- ✅ **DAC8565** — SPI PA5/PA7/PB6/PB7, IOVDD→+3.3V, AVDD→+5VA, RST pull-up + PC4_GPIO, CV1-4_OUT renombradas
+- ✅ **F5 Jacks audio** — 2× NRJ4HF-1 (L/R) + RCJ-32265 triple RCA, filtro correcto
+- ✅ **DAC8565 CV** — AVDD→+5VA (C45 10µ+C41 100n), DVDD→+3.3V (C44 100n+C46 10µ), VREFL→GNDA, RST→PD4_GPIO, RSTSEL/ENABLE→GND, salidas→J1/J2/J3/J4
+- ✅ **PCM5122** — XSMT→PC3_GPIO, AVDD/CPVDD→+3.3VA, DVDD→+3.3V, DGND→GND, AGND/CPGND→GNDA, filtro 470Ω+2n2+100Ω, CAPP/CAPM C48 2u2, VCOM C39 10µ, VNEG C35 2u2, MODE1/2→+3.3VA
+- ✅ **LT3042 3.3VA** — FB3 600Ω entrada, C25 4u7 entrada, C27 4u7 salida, C26 0.47µ (C_SET), R7 (RSET), OUT→+3.3VA
+- ✅ **AMS1117 3.3V** — C15 100n + C17 22µ entrada, C18 22µ + C16 100n salida, 5V_BUS→VI→VO→+3.3V
+- ✅ **F4 USBLC6-2P6** — U2 en bloque USB-C, pines 3/4→USB_D+, pines 1/6→USB_D-, GND→GND (integrado en bloque USB-C)
+- ✅ **F7 W25Q128JVS** — U4, PB14_GPIO_OUT→/CS, PB13_SPI2_SCK→CLK, PB15_SPI2_MOSI→DI/IO0, PB4_SPI2_MISO→DO/IO1, WP/IO2→+3.3V (pull-up R16), HOLD/IO3→+3.3V (pull-up), VCC→+3.3V + C49 100n
+- ✅ **F9 MCP23017 + Cherry MX ×16** — GPA0-7→SW1-8, GPB0-7→SW9-16, INTA→PC0, RESET pull-up, 0x20
+
+---
+
+## ⚠️ ADVERTENCIAS — REVISAR EN ESQUEMÁTICO ACTUAL
+
+---
+
+### ⚠️ ADVERTENCIA 1 — R1 en BOOT0: verificar valor
+
+En el esquemático se ve **R1** entre BOOT0 y +3.3V (en serie con SW1). El valor mostrado parece **"100n"** o "R1" sin valor legible.
+
+- Si R1 es una **resistencia de 10kΩ pull-up** (para limitar corriente cuando el switch está cerrado) → ✅ correcto
+- Si R1 es un **condensador 100nF** → ❌ error — BOOT0 no tiene pull-down definido al arrancar
+
+**El circuito correcto debe ser:**
+```
+BOOT0 (pin 94) ──[R_BOOT 10kΩ, 0402]──► GND       ← pull-down obligatorio
+BOOT0 (pin 94) ──────────────────────► SW1 ──► +3.3V
+```
+**Verificar:** ¿Existe R_BOOT pull-down a GND? ¿R1 está en serie al switch o directamente a BOOT0?
+
+---
+
+### ⚠️ ADVERTENCIA 2 — SK6812: cadena DIN→DOUT no visible
+
+En el bloque SW SEQUENCER, los pines **VDD** y **VSS** de los 16 switches se ven conectados a +3.3V y GND respectivamente (flechas arriba/abajo). Pero **no se ve** la cadena de datos:
+
+```
+STM32 GPIO ──► SW1.DIN → SW1.DOUT ──► SW2.DIN → ... → SW16.DOUT ──► NC (o 10kΩ a GND)
+```
+
+**Verificar:** ¿Están conectados DOUT de SW_n al DIN de SW_n+1? ¿Qué GPIO del STM32 va al DIN de SW1? El pin GPIO para datos SK6812 debe agregarse como net nombrada (ej. `SK6812_DATA`).
+
+---
+
+### ⚠️ ADVERTENCIA 3 — STM32: tierra GNDA en pin VSS
+
+En el esquemático del STM32, la tierra de los pines VSS sale como **GNDA**. Los pines VSS del STM32 son tierra **digital** y deben conectarse a `GND` (no a `GNDA` analógico).
+
+- `GND` = tierra digital → STM32 VSS, AMS1117, lógica
+- `GNDA` = tierra analógica → PCM5122, DAC8565, filtros de audio
+
+**Si están unidos en el plano de PCB** → es aceptable, pero en el esquemático las nets deben ser distintas para que el ERC no marque errores y el router sepa dónde poner el split de planos.
+
+---
+
+### ⚠️ ADVERTENCIA 4 — MCP23017: INTB sin conectar
+
+El MCP23017 tiene INTB (pin 19) visible pero con símbolo de "X" (sin conectar). Si vas a usar los 16 switches en interrupciones:
+- **Solo PORTA** → INTA→PC0 es suficiente, INTB→NC está bien ✓
+- **PORTB también** → conectar INTB a otro GPIO (ej. PC1) para interrupciones del banco B
+
+Con polling por I2C (sin interrupciones) ambos NC están bien. Si usas INTA para interrupción de cualquier cambio en los 16 pines, configurar `MIRROR=1` en el registro IOCON — así INTA refleja cambios de ambos bancos y no necesitas INTB.
+
+---
+
+### ⚠️ ADVERTENCIA 5 — USB-C: CC1/CC2 — verificar dirección de R3/R4 (CRÍTICO)
+
+En la imagen del bloque USB-C, la etiqueta **"5V_USB"** aparece encima de R3(5K1) y R4(5K1) que van a CC2(B5) y CC1(A5). Si la conexión es:
+
+```
+5V_USB ──[R3 5K1]──► CC2        ← ❌ PULL-UP a VBUS = error original no corregido
+5V_USB ──[R4 5K1]──► CC1
+```
+```
+GND ◄──[R3 5K1]── CC2           ← ✅ correcto: pull-DOWN a GND
+GND ◄──[R4 5K1]── CC1
+```
+
+**En la imagen se ven flechas hacia arriba desde R3/R4 con etiqueta "5V_USB" — esto sugiere que el nodo superior de los resistores está en el net 5V_USB (VBUS), no en GND.** Si es así, el error original ERROR 1 sigue presente.
+
+**Verificar en KiCad:** hacer clic en R3/R4 → ver a qué nets conectan sus dos terminales. Pin 1 debe ir a CC_x, pin 2 **debe ir a GND**.
+
+---
+
+### ⚠️ ADVERTENCIA 6 — RCJ-32265: Canal C (J7B) con pin señal sin net visible
+
+El conector RCJ-32265 es triple RCA (L/C/R). En el esquemático:
+- **J7A** → canal L → `L_CHAN_RCA` ✅
+- **J7C** → canal R → `R_CHAN_RCA` ✅
+- **J7B** → canal C (center/video) → pin señal muestra "X" o sin net clara
+
+Si el pin señal de J7B está sin asignar (flotante en PCB), el pad del conector queda sin conectar pero eso no causa problema funcional. **Si accidentalmente está unido a L_CHAN o R_CHAN, ambos canales se cortocircuitan.**
+
+**Verificar:** en KiCad, seleccionar J7B → confirmar que el pin señal (pin 1) tiene marcador "No Connect" (X) explícito y no está conectado a ninguna net de audio.
+
+---
+
+### ⚠️ ADVERTENCIA 7 — DAC8565: Verificar que LDAC y DIN usan pines distintos
+
+En la imagen del DAC8565 se ven cuatro etiquetas de GPIO para LDAC/SYNC/SCLK/DIN. La imagen muestra:
+- LDAC → PF7_GPIO_OUT
+- SYNC → PF8_GPIO_OUT
+- SCLK → PF9_SR1_SCK (o similar)
+- DIN → ¿PF7? (ilegible en imagen)
+
+**Si DIN también usa PF7 → conflicto de pines: dos señales distintas en el mismo GPIO.**
+
+El plan original era: SPI con PA5(SCK)/PA7(MOSI)/PB6(CS)/PB7(LDAC). Si se cambió a SPI4 (PF pins), los pines válidos en STM32H743 para SPI4 son:
+```
+SPI4: PF7=SCK, PF8=MISO, PF9=MOSI (o PF11=MOSI según AF)
+LDAC: cualquier GPIO libre, ej. PE2, PD0, etc.
+```
+**Verificar en CubeMX** que ningún pin tiene doble asignación.
+
+---
+
+### ⚠️ ADVERTENCIA 8 — PCM5122: Asignación I2S — verificar PE5
+
+En el esquemático el PCM5122 muestra:
+- PE2_I2S_MCLK → SCK (MCLK del PCM5122) ✅
+- PE5_I2S_BCK → BCK ← ⚠️ **a verificar**
+- PE4_I2S_LRCK → LRCK ✅
+- DIN (datos I2S) → ¿qué pin?
+
+En el STM32H743, para I2S4:
+- **PE2** = I2S4_CK ✅
+- **PE4** = I2S4_WS (LRCK) ✅
+- **PE5** = I2S4_SD (datos, no BCK) ← conflicto de nombre
+- **PE6** = I2S4_MCK (MCLK)
+
+Si PE5 es I2S4_SD en el hardware pero en el esquemático se etiqueta como BCK (bit clock), hay confusión de señales. **El bit clock (BCK) en I2S4 del STM32H743 suele ser PE2 o PB13.**
+
+**Verificar en CubeMX:** con I2S4 activado, confirmar qué pin es asignado a SCK (BCK), WS (LRCK), SD (DIN) y MCK — y que coincidan exactamente con las etiquetas del esquemático.
+
+---
+
+### ⚠️ ADVERTENCIA 9 — LT3042: Verificar conexión de pin ILIM
+
+En la imagen del bloque LDO 3.3VA, se ve R7 cerca del LT3042 pero la imagen es pequeña. El LT3042 (MSOP-10) tiene:
+- **Pin 5 = ILIM** → debe conectar a GND a través de RILIM (ej. 360kΩ para 200mA)
+- **Pin 7 = SET** → debe conectar a GND a través de RSET (33.2kΩ para 3.3V)
+
+Si R7 es la única resistencia visible y conecta SET a GND, pero ILIM queda sin conectar → límite de corriente indefinido (puede llegar a máximo del IC = ~500mA con sobrecalentamiento).
+
+**Verificar:** ¿Existen dos resistencias separadas para ILIM y SET, o solo una?
+
+---
 
 ---
 
@@ -308,119 +198,7 @@ Salida:  100nF cerámico en paralelo con C18
 
 ---
 
-### 🔴 BLOQUE F1 — VCAP1 y VCAP2 (agregar al bloque DECOUPLING STM)
-
-**Obligatorio. Sin esto el STM32H743 puede no arrancar.**
-
-```
-Pin 48 (VCAP1) ──► C_VCAP1 [2.2µF, cerámico X5R, 0805] ──► GND
-Pin 73 (VCAP2) ──► C_VCAP2 [2.2µF, cerámico X5R, 0805] ──► GND
-```
-
-> ⚠️ NO conectar a VDD. Estos pines son la salida del regulador interno de 1.2V del core.
-> Condensadores deben ser cerámicos (no electrolíticos). 2.2µF exacto, no más de 4.7µF.
-
----
-
-### 🔴 BLOQUE F2 — Fuente +5VA (ferrite simple desde 5V_BUS)
-
-**Requerido por DAC8565 AVDD. Sin este bloque la net +5VA queda sin fuente.**
-
-```
-5V_BUS ──[FB4, Ferrite 600Ω@100MHz, 500mA]──► +5VA
-                                               ├── C_5VA_1 [4.7µF, X5R, 0805] ──► GNDA
-                                               └── C_5VA_2 [100nF, C0G, 0402] ──► GNDA
-```
-
-> No necesita LDO. El DAC8565 genera CV para gear externo — ruido no crítico.
-> Ferrite recomendado: Murata BLM21PG601SN1D o equivalente 0805.
-
----
-
-### 🔴 BLOQUE F3 — BOOT0 + Switch SMD DFU (programación por USB sin ST-Link)
-
-**Solución implementada con switch SMD en lugar de jumper.**
-
-```
-BOOT0 (pin 94 STM32) ──[R_BOOT, 10kΩ, 0402]──► GND
-BOOT0 (pin 94 STM32) ──────────────────────► SW_BOOT [Switch SPST SMD] ──► +3.3V
-```
-
-**Switch recomendado:** Alps SKQGAF010 (SMD SPST, 3.9×2.9mm, panel ON/OFF)
-→ Usar un switch NO-momentáneo (toggle/sliding) para no tener que mantenerlo pulsado durante la carga.
-
-**Cómo usar SW_BOOT:**
-- Switch OFF (normal): BOOT0 = LOW → arranca firmware desde Flash
-- Switch ON: BOOT0 = HIGH → arranca DFU → flashear con STM32CubeProgrammer por USB
-
----
-
-### ✅ BLOQUE F4 — USBLC6-2 ESD (protección datos USB) (COMPLETADO)
-
-**Va entre el conector USB-C y los pines PA11/PA12 del STM32.**
-
-```
-                    USBLC6-2SC6 (SOT-23-6)
-USB_D-  ──────────► I/O1 ──────────────────► PA11 (USB_DM)
-USB_D+  ──────────► I/O2 ──────────────────► PA12 (USB_DP)
-5V_BUS  ──────────► VCC  (protección VBUS)
-GND     ──────────► GND
-```
-
-> Datasheet: STMicroelectronics USBLC6-2SC6
-> Footprint: SOT-23-6. Orientación crítica — verificar I/O1→D- e I/O2→D+ en el symbol.
-
----
-
-### ✅ BLOQUE F5 — Jacks Salida Audio (COMPLETADO)
-
-**Las nets L_CHAN y R_CHAN ya salen del filtro RC del PCM5122 y se bifurcan a PLUG y RCA.**
-
-**¿Se necesita op-amp?**
-**No.** El PCM5122 en modo single-ended (que es lo que tienes) tiene buffer de salida
-interno. Puede manejar directamente las entradas de cualquier equipo (mezcladores, interfaces,
-monitores activos) que típicamente son 10kΩ–100kΩ. Sin op-amp necesario. ✓
-
-**Circuito actual — ya correcto ✓**
-```
-                R8 470Ω          C36 2n2        R10 100Ω
-PCM5122 OUTR ──[R8, 470Ω]──┬──[C36, 2n2]──► GNDA     ├──────────► R_CHAN_PLUG ──► J_TRS_R Tip
-                            │                          R11 100Ω
-                            └──────────────────────────┴──────────► R_CHAN_RCA  ──► J_RCA_R Tip
-
-                R9 470Ω          C40 2n2        R12 100Ω
-PCM5122 OUTL ──[R9, 470Ω]──┬──[C40, 2n2]──► GNDA     ├──────────► L_CHAN_PLUG ──► J_TRS_L Tip
-                            │                          R13 100Ω
-                            └──────────────────────────┴──────────► L_CHAN_RCA  ──► J_RCA_L Tip
-
-Todos los Sleeve/Shell ──► GNDA
-```
-
-**El filtro 470Ω + 2.2nF** es un low-pass con fc = 1/(2π × 470 × 2.2e-9) ≈ **154 kHz** — limpia
-aliasing de ultrasonido sin tocar el audio audible (20Hz–20kHz). ✓
-
-**Los 100Ω en serie** hacia cada jack aislan capacitancias de cable y protegen contra cortocircuito. ✓
-
-**Símbolo KiCad usado:** `Connector_Audio:NRJ4HF-1` (Neutrik, horizontal, mono) × 2
-Footprint incluido: `Connector_Audio:Jack_6.35mm_Neutrik_NRJ4HF-1_Horizontal` ✓
-
-```
-J8 — Canal DERECHO               J6 — Canal IZQUIERDO
-──────────────────               ────────────────────
-T  ──► R_CHAN_PLUG                T  ──► L_CHAN_PLUG
-S  ──► GNDA                       S  ──► GNDA
-G  ──► GNDA  (chassis)            G  ──► GNDA  (chassis)
-TN ──► NC                         TN ──► NC
-```
-
-> TN es el contacto normalmente cerrado que se abre al insertar el jack — no conectar.
-> G es el blindaje metálico del conector — conectar a GNDA igual que S.
-> ⚠️ No añadir BAT54S ni diodos en señal de audio — distorsionan.
-> Footprint RCA recomendado: `Connector_Audio:Jack_RCA_CUI_RCJ-014` — PCB mount.
-
----
-
-### ✅ BLOQUE F6 — Jacks CV Out (4× TRS 3.5mm)
+### 🔴 BLOQUE F6 — Jacks CV Out (4× TRS 3.5mm)
 
 **Las nets CV1..CV3 ya salen del DAC8565. VOUTD está NC pero puede añadirse como CV4.**
 
@@ -458,30 +236,6 @@ DAC8565 VOUTx ──[100Ω, 0402]──► J_CVx [Jack TRS 3.5mm]
 
 ---
 
-### ✅ BLOQUE F7 — W25Q128 Flash SPI (16MB)
-
-**Almacena patches, wavetables y datos de secuenciador. SPI2 del STM32.**
-
-```
-STM32H743 SPI2          W25Q128JVSIQ (SOIC8)
-──────────────           ────────────────────
-PB13 (SPI2_SCK)  ──────► Pin 6 (CLK)
-PB5  (SPI2_MOSI) ──────► Pin 5 (DI)
-PB4  (SPI2_MISO) ◄────── Pin 2 (DO)
-PB14 (GPIO OUT)  ──────► Pin 1 (~CS)
-
-Pin 1 (~CS)   ── [100kΩ pull-up] ──► +3.3V  (evita acceso accidental al arrancar)
-Pin 3 (~WP)   ──────────────────► +3.3V      (write-protect deshabilitado = siempre escribible)
-Pin 7 (~HOLD) ──[10kΩ pull-up]──► +3.3V     (no usar hold)
-Pin 8 (VCC)   ──► +3.3V + C [100nF, C0G] ──► GND
-Pin 4 (GND)   ──► GND
-```
-
-> LCSC: C97521 (W25Q128JVSIQ, SOIC8). Precio: ~$1.50
-> Velocidad máx SPI2: 50MHz. En CubeMX: SPI2 → Full-Duplex Master → Prescaler /4 = 120MHz/4 = 30MHz.
-
----
-
 ### 🟡 BLOQUE F8 — SSD1306 OLED 128×64 I2C
 
 **Display principal. Usa el bus I2C1 que ya existe (PB8/PB9).**
@@ -498,34 +252,6 @@ SSD1306 (dirección I2C: 0x3C)
 > Pull-ups I2C: UN SOLO PAR de 4.7kΩ para todo el bus (PCM5122 + OLED + PCA9685 + MCP23017).
 > Si ya los pusiste en el bloque PCM5122, no duplicar aquí.
 > Si tienes el módulo breakout de AliExpress, ya incluye pull-ups y VCC filter.
-
----
-
-### 🟡 BLOQUE F9 — MCP23017 Expansor GPIO (switches y botones)
-
-**16 GPIO extra por I2C. Escanea 16 step-switches + botones de función.**
-
-```
-STM32H743 I2C1           MCP23017 (SSOP28, dirección I2C: 0x20)
-──────────────            ────────────────────────────────────
-PB8 (SCL) ──────────────► Pin 12 (SCL)
-PB9 (SDA) ──────────────► Pin 13 (SDA)
-PC0 (GPIO IN, EXTI) ◄──── Pin 20 (INT_A)    ← interrupción, activo LOW
-
-Pin 9  (VDD)      ──► +3.3V + C [100nF] ──► GND
-Pin 10 (VSS)      ──► GND
-Pin 18 (RESET_n)  ──[10kΩ pull-up]──► +3.3V   (sin reset externo)
-Pin 15 (A0)       ──► GND  ┐
-Pin 16 (A1)       ──► GND  │→ dirección = 0x20
-Pin 17 (A2)       ──► GND  ┘
-
-GPA0–GPA7 (Pins 21–28): 8× step switches, steps 1–8
-GPB0–GPB7 (Pins 1–8):   8× step switches, steps 9–16
-  Cada switch: Pin GPxy ──► SW_n ──► GND   (pull-up interno del MCP23017 habilitado por I2C)
-```
-
-> Los pull-ups de los switches se habilitan por software (registro GPPU = 0xFF).
-> Sin resistores pull-up externos en el PCB para los switches. ✓ Ahorra espacio.
 
 ---
 
@@ -585,30 +311,55 @@ RV4 — Filter Cutoff (10kΩ lineal):
 
 ---
 
-### 🟢 BLOQUE F12 — PCA9685 Driver LEDs PWM (16 canales)
+### � BLOQUE F12 — SK6812 Mini-E RGB LEDs ×16 (cadena datos, 1 GPIO)
 
-**LEDs del secuenciador. Mismo bus I2C1.**
+**Los SK6812 están integrados en el footprint del Cherry MX (pines VDD/VSS/DIN/DOUT).**
+**Un solo GPIO del STM32 controla los 16 LEDs RGB en cadena. No se necesita PCA9685.**
 
 ```
-STM32H743 I2C1          PCA9685 (TSSOP28, dirección: 0x40)
-──────────────           ──────────────────────────────────
-PB8 (SCL) ─────────────► Pin 19 (SCL)
-PB9 (SDA) ─────────────► Pin 18 (SDA)
-PD12 (GPIO OUT) ────────► Pin 20 (~OE)  + [10kΩ pull-down a GND] ← LEDs ON por defecto
+── Alimentación (misma para los 16) ──
+SWx VDD ──► +3.3V
+SWx VSS ──► GND
 
-Pin 1–6  (A0–A5) ──► GND  → dirección 0x40
-Pin 17 (VDD)  ──► +3.3V + C [100nF] ──► GND
-Pin 16 (GND)  ──► GND
-Pin 21 (EXTCLK) ──► GND (oscilador interno)
+── Cadena de datos ──
+STM32 PC5 (GPIO OUT) ──[33Ω serie]──► SW1.DIN
+                                       SW1.DOUT ──► SW2.DIN
+                                                     SW2.DOUT ──► ... ──► SW16.DOUT ──► NC
 
-── Salidas LED (misma conexión ×16) ──
-Pin LED_n ──[R 330Ω, 0402]──► LED_ANODE ──► LED ──► GND
-  Cálculo: (3.3V - 2.0V_fwd) / 330Ω = 3.9mA (visible, bajo consumo)
-  Para más brillo: usar 150Ω → 8.7mA
+── Decoupling por LED (importante para evitar glitches) ──
+Cada VDD–VSS: [100nF, C0G, 0402] en paralelo, lo más cerca posible del pad VDD
 ```
 
-> Si quieres LEDs bicolor (rojo + verde por paso): necesitas 2× PCA9685.
-> Segundo en dirección 0x41 (A0 → +3.3V, A1–A5 → GND).
+**⚠️ Problema de nivel lógico:**
+SK6812 necesita DIN ≥ 0.7×VDD para reconocer un "1".
+- Con VDD=3.3V → umbral = 2.31V → STM32 (3.3V) ✅ funciona directamente
+- Con VDD=5V → umbral = 3.5V → STM32 (3.3V) ❌ nivel insuficiente
+
+**→ Alimentar con +3.3V, no +5V.** Brillo ligeramente menor pero funciona sin level shifter.
+
+**Resistor 33Ω serie en DIN** protege el GPIO del STM32 contra reflexiones en la línea de datos.
+
+**Protocolo en firmware (STM32H743):**
+```c
+// Usar TIM + DMA para generar señal 800kHz
+// T0H=0.3µs, T1H=0.6µs, periodo=1.25µs
+// Librerías: ws2812b_stm32_hal o implementación propia con TIM1 CH1 DMA
+// Reset: línea LOW > 80µs
+
+// Formato de color por LED: G[7:0] R[7:0] B[7:0] (¡GRB, no RGB!)
+```
+
+**Estados visuales sugeridos:**
+| Estado step | Color | Valor GRB |
+|---|---|---|
+| Vacío | Rojo tenue | `0x001800` |
+| Activo/programado | Rojo fuerte | `0x00FF00` |
+| Cursor reproducción | Blanco | `0x808080` |
+| Mute | Naranja parpadeante | `0x201000` ↔ off |
+
+> Símbolo usado: el que ya tienes con pines VSS/DOUT/DIN/VDD + pines 1/2 switch
+> Net de datos: `SK6812_DATA` (de PC5 al DIN de SW1)
+> El pin PC5 debe configurarse como GPIO Output Push-Pull en CubeMX
 
 ---
 
@@ -681,35 +432,29 @@ USBLC6-2SC6 (SOT-23-6) — protección ESD datos:
 
 ---
 
-## PLAN DE CORRECCIONES — ESTADO ACTUAL
+## ESTADO ACTUAL — PENDIENTES
 
 ```
-CORRECCIONES APLICADAS ✅:
-  1. ✅ CC1/CC2 en USB-C → GND (pull-down)
-  2. ✅ BOOT0: pull-down 10kΩ + SW_BOOT SMD (en lugar de jumper)
-  3. ✅ XSMT del PCM5122 → +3.3VA
-  4. ✅ Bloque +5VA: ferrite BLM21 desde 5V_BUS + 4.7µF + 100nF a GNDA
-  5. ✅ R2 (1K5) en USB_DP eliminado
-  6. ✅ F2 (polyfuse duplicado) eliminado — queda 1× polyfuse 2A
-  7. ✅ VCAP1 y VCAP2 (2.2µF X5R) añadidos
-  8. ✅ Resistor serie 22Ω en OSC_IN del cristal
-  9. ✅ Naming AGND → GNDA unificado
-  10. ✅ RILIM 360kΩ a GND en LT3042
+PENDIENTES (diseñar en KiCad):
+  🔴 F6  — Jacks CV 4× TRS 3.5mm + BAT54S
+  🟡 F8  — OLED SSD1306 (I2C)
+  🟡 F10 — Encoders EC11 ×8
+  🟡 F11 — Potenciómetros RV3/RV4
+  🟡 F12 — SK6812 RGB cadena (1 GPIO PC5, sin PCA9685)
+  🟢 F13 — MIDI DIN IN (6N137)
+  🟢 F14 — MIDI DIN OUT
+  🟢 F15 — USB-B MIDI + USBLC6-2
 
-BLOQUES PENDIENTES (diseñar en KiCad):
-  11. ○ F1 — VCAP conexiones en bloque decoupling
-  12. ○ F4 — USBLC6-2 ESD en USB datos
-  13. ✅ F5 — Jacks audio: 2× NRJ4HF-1 (L/R) + RCJ-32265 triple RCA (C sin conectar)
-  14. ○ F6 — Jacks CV 4× TRS 3.5mm + BAT54S
-  15. ○ F7 — Flash W25Q128 (SPI2)
-  16. ○ F8 — OLED SSD1306 (I2C)
-  17. ○ F9 — MCP23017 switches (I2C)
-  18. ○ F10 — Encoders EC11 ×8
-  19. ○ F11 — Potenciómetros RV3/RV4
-  20. ○ F12 — PCA9685 + LEDs ×16
-  21. ○ F13 — MIDI DIN IN (6N137)
-  22. ○ F14 — MIDI DIN OUT
-  23. ○ F15 — USB-B MIDI + USBLC6-2
+ADVERTENCIAS ACTIVAS (ver sección arriba):
+  ⚠️  [BOOT0] Verificar R1 en BOOT0 — debe ser 10kΩ pull-down a GND
+  ⚠️  [SK6812] Conectar cadena DIN→DOUT entre los 16 switches
+  ⚠️  [STM32 GND] Verificar net GND vs GNDA en pines VSS del STM32
+  ⚠️  [MCP23017] Considerar IOCON.MIRROR=1 para usar solo INTA en 16 switches
+  ⚠️  [USB-C CC] VERIFICAR R3/R4: deben ir a GND, no a 5V_USB — imagen ambigua
+  ⚠️  [RCA J7B] Confirmar pin señal del canal C con marcador NC explícito
+  ⚠️  [DAC8565 SPI] Verificar que LDAC y DIN no usan el mismo GPIO (PF7)
+  ⚠️  [PCM5122 I2S] Verificar asignación PE5: es SD (datos), no BCK
+  ⚠️  [LT3042] Confirmar que R7 es RSET y existe resistencia separada para RILIM (ILIM pin 5)
 ```
 
 ---
