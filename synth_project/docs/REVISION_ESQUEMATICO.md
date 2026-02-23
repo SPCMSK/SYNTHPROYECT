@@ -275,31 +275,341 @@ Salida:  100nF cerámico en paralelo con C18
 
 ---
 
-## BLOQUES FALTANTES POR DISEÑAR
+## BLOQUES FALTANTES — CONEXIONES DETALLADAS
 
-Los siguientes bloques **no están en ninguna imagen** — deben crearse:
+> Úsalos como guía directa en KiCad. Cada bloque está listo para copiar pin a pin.
 
-### Alta prioridad (sin estos el proyecto no funciona)
-- [ ] **SWD connector** (10-pin ARM, Samtec FTSH-105) — para programar el STM32
-- [ ] **VCAP capacitors** (2× 2.2µF a GND, pines 48 y 73) — puede ir en bloque decoupling
-- [ ] **Fuente +5VA** (ferrite desde 5V_BUS + caps) — requerida por DAC8565
-- [ ] **USBLC6-2 ESD** en USB_D+/USB_D− (entre conector USB y STM32) — protección ESD
-- [ ] **Jacks de salida audio** (TRS 6.35mm + RCA) con las nets L/R_CHAN_PLUG y L/R_CHAN_RCA
-- [ ] **Jacks CV out** (4× TRS 3.5mm) con BAT54S anti-reversa en cada uno
+---
 
-### Media prioridad (funcionalidad del sintetizador)
-- [ ] **W25Q128 Flash SPI** (SPI2: PB13/PB5/PB4/PB14) — 16MB almacenamiento de patches
-- [ ] **SSD1306 OLED** (I2C: PB8/PB9, 0x3C) — display 128×64
-- [ ] **MCP23017** (I2C: PB8/PB9, 0x20) — 16 step switches + botones
-- [ ] **Encoders EC11 ×8** con pull-ups 10kΩ y caps 100nF anti-rebote
-- [ ] **Potenciómetros** RV3 (Master Volume → PA0) y RV4 (Filter Cutoff → PA1)
+### 🔴 BLOQUE F1 — VCAP1 y VCAP2 (agregar al bloque DECOUPLING STM)
 
-### Baja prioridad (UI completa)
-- [ ] **PCA9685** (I2C: PB8/PB9, 0x40) — driver 16× LED con PWM
-- [ ] **LEDs ×16** con resistores 330Ω (o bicolor rojo/verde ×16)
-- [ ] **MIDI DIN IN** — optoacoplador 6N137, diodo 1N4148, USART1_RX (PA10)
-- [ ] **MIDI DIN OUT** — 2× 220Ω, USART1_TX (PA9)
-- [ ] **Conector USB-B MIDI** (separado del USB-C de power) + USBLC6-2
+**Obligatorio. Sin esto el STM32H743 puede no arrancar.**
+
+```
+Pin 48 (VCAP1) ──► C_VCAP1 [2.2µF, cerámico X5R, 0805] ──► GND
+Pin 73 (VCAP2) ──► C_VCAP2 [2.2µF, cerámico X5R, 0805] ──► GND
+```
+
+> ⚠️ NO conectar a VDD. Estos pines son la salida del regulador interno de 1.2V del core.
+> Condensadores deben ser cerámicos (no electrolíticos). 2.2µF exacto, no más de 4.7µF.
+
+---
+
+### 🔴 BLOQUE F2 — Fuente +5VA (ferrite simple desde 5V_BUS)
+
+**Requerido por DAC8565 AVDD. Sin este bloque la net +5VA queda sin fuente.**
+
+```
+5V_BUS ──[FB4, Ferrite 600Ω@100MHz, 500mA]──► +5VA
+                                               ├── C_5VA_1 [4.7µF, X5R, 0805] ──► GNDA
+                                               └── C_5VA_2 [100nF, C0G, 0402] ──► GNDA
+```
+
+> No necesita LDO. El DAC8565 genera CV para gear externo — ruido no crítico.
+> Ferrite recomendado: Murata BLM21PG601SN1D o equivalente 0805.
+
+---
+
+### 🔴 BLOQUE F3 — BOOT0 + Header DFU (programación por USB sin ST-Link)
+
+**Reemplaza el R1 pull-up actual. Permite flashear firmware por USB-C.**
+
+```
++3.3V ──┐
+        JP1 [Header 2 pines, 2.54mm] ──┬── BOOT0 (pin 94 STM32)
+                                        └── R_BOOT [10kΩ, 0402] ──► GND
+```
+
+**Cómo usar JP1:**
+- Sin jumper (normal): BOOT0 = LOW → arranca firmware desde Flash
+- Con jumper puesto: BOOT0 = HIGH → arranca DFU → flashear con STM32CubeProgrammer por USB
+
+---
+
+### 🔴 BLOQUE F4 — USBLC6-2 ESD (protección datos USB)
+
+**Va entre el conector USB-C y los pines PA11/PA12 del STM32.**
+
+```
+                    USBLC6-2SC6 (SOT-23-6)
+USB_D-  ──────────► I/O1 ──────────────────► PA11 (USB_DM)
+USB_D+  ──────────► I/O2 ──────────────────► PA12 (USB_DP)
+5V_BUS  ──────────► VCC  (protección VBUS)
+GND     ──────────► GND
+```
+
+> Datasheet: STMicroelectronics USBLC6-2SC6
+> Footprint: SOT-23-6. Orientación crítica — verificar I/O1→D- e I/O2→D+ en el symbol.
+
+---
+
+### 🔴 BLOQUE F5 — Jacks Salida Audio (TRS 6.35mm + RCA)
+
+**Las nets L/R_CHAN_PLUG y L/R_CHAN_RCA ya salen del bloque PCM5122. Solo faltan los jacks.**
+
+```
+── Canal Izquierdo ──
+L_CHAN_PLUG ──► J_TRS_L [Jack TRS 6.35mm]   Tip = audio L, Sleeve = GNDA
+L_CHAN_RCA  ──► J_RCA_L [Jack RCA]           Tip = audio L, Sleeve = GNDA
+
+── Canal Derecho ──
+R_CHAN_PLUG ──► J_TRS_R [Jack TRS 6.35mm]   Tip = audio R, Sleeve = GNDA
+R_CHAN_RCA  ──► J_RCA_R [Jack RCA]           Tip = audio R, Sleeve = GNDA
+
+── Protección ESD en cada jack (opcional pero recomendado) ──
+Tip de cada jack ──► BAT54S (doble schottky SOT-23):
+  Diodo 1: Tip ──► GNDA  (clamp negativo)
+  Diodo 2: +5VA ──► Tip  (clamp positivo)
+```
+
+> Footprint TRS 6.35mm recomendado: SJ-63035-SMT-TR (CUI) — PCB mount.
+> Footprint RCA recomendado: RCJ-014 (CUI) — PCB mount.
+
+---
+
+### 🔴 BLOQUE F6 — Jacks CV Out (4× TRS 3.5mm)
+
+**Las nets CV1..CV3 ya salen del DAC8565. VOUTD está NC pero puede añadirse como CV4.**
+
+```
+── Conexión idéntica para los 4 jacks ──
+DAC8565 VOUTx ──[100Ω, 0402]──► J_CVx [Jack TRS 3.5mm]
+                                  Tip    = CV signal (0–2.5V)
+                                  Ring   = NC
+                                  Sleeve = GNDA
+
+── Protección por jack (BAT54S, SOT-23) ──
+  Diodo A (katodo → +5VA ó +3.3V, ánodo → Tip): clamp positivo
+  Diodo B (katodo → Tip, ánodo → GNDA): clamp negativo
+  → previene que un Eurorack inyecte ±12V hacia el DAC8565
+```
+
+> Nets: CV1_OUT, CV2_OUT, CV3_OUT, CV4_OUT
+> Renombrar VCF→CV1_OUT, VCA→CV2_OUT, PITCH/CV→CV3_OUT en el bloque DAC8565.
+> Footprint: SJ-3523-SMT-TR (CUI) o PJ-3523 — PCB mount 3.5mm.
+
+---
+
+### 🟡 BLOQUE F7 — W25Q128 Flash SPI (16MB)
+
+**Almacena patches, wavetables y datos de secuenciador. SPI2 del STM32.**
+
+```
+STM32H743 SPI2          W25Q128JVSIQ (SOIC8)
+──────────────           ────────────────────
+PB13 (SPI2_SCK)  ──────► Pin 6 (CLK)
+PB5  (SPI2_MOSI) ──────► Pin 5 (DI)
+PB4  (SPI2_MISO) ◄────── Pin 2 (DO)
+PB14 (GPIO OUT)  ──────► Pin 1 (~CS)
+
+Pin 1 (~CS)   ── [100kΩ pull-up] ──► +3.3V  (evita acceso accidental al arrancar)
+Pin 3 (~WP)   ──────────────────► +3.3V      (write-protect deshabilitado = siempre escribible)
+Pin 7 (~HOLD) ──[10kΩ pull-up]──► +3.3V     (no usar hold)
+Pin 8 (VCC)   ──► +3.3V + C [100nF, C0G] ──► GND
+Pin 4 (GND)   ──► GND
+```
+
+> LCSC: C97521 (W25Q128JVSIQ, SOIC8). Precio: ~$1.50
+> Velocidad máx SPI2: 50MHz. En CubeMX: SPI2 → Full-Duplex Master → Prescaler /4 = 120MHz/4 = 30MHz.
+
+---
+
+### 🟡 BLOQUE F8 — SSD1306 OLED 128×64 I2C
+
+**Display principal. Usa el bus I2C1 que ya existe (PB8/PB9).**
+
+```
+SSD1306 (dirección I2C: 0x3C)
+  VCC  ──► +3.3V + C [100nF] ──► GND
+  GND  ──► GND
+  SCL  ──► PB8 (I2C1_SCL)   ← pull-up 4.7kΩ compartido con otros ICs del bus
+  SDA  ──► PB9 (I2C1_SDA)   ← pull-up 4.7kΩ compartido
+  RES  ──► PD15 (GPIO OUT)  + R [10kΩ pull-up a +3.3V] + C [100nF a GND]
+```
+
+> Pull-ups I2C: UN SOLO PAR de 4.7kΩ para todo el bus (PCM5122 + OLED + PCA9685 + MCP23017).
+> Si ya los pusiste en el bloque PCM5122, no duplicar aquí.
+> Si tienes el módulo breakout de AliExpress, ya incluye pull-ups y VCC filter.
+
+---
+
+### 🟡 BLOQUE F9 — MCP23017 Expansor GPIO (switches y botones)
+
+**16 GPIO extra por I2C. Escanea 16 step-switches + botones de función.**
+
+```
+STM32H743 I2C1           MCP23017 (SSOP28, dirección I2C: 0x20)
+──────────────            ────────────────────────────────────
+PB8 (SCL) ──────────────► Pin 12 (SCL)
+PB9 (SDA) ──────────────► Pin 13 (SDA)
+PC0 (GPIO IN, EXTI) ◄──── Pin 20 (INT_A)    ← interrupción, activo LOW
+
+Pin 9  (VDD)      ──► +3.3V + C [100nF] ──► GND
+Pin 10 (VSS)      ──► GND
+Pin 18 (RESET_n)  ──[10kΩ pull-up]──► +3.3V   (sin reset externo)
+Pin 15 (A0)       ──► GND  ┐
+Pin 16 (A1)       ──► GND  │→ dirección = 0x20
+Pin 17 (A2)       ──► GND  ┘
+
+GPA0–GPA7 (Pins 21–28): 8× step switches, steps 1–8
+GPB0–GPB7 (Pins 1–8):   8× step switches, steps 9–16
+  Cada switch: Pin GPxy ──► SW_n ──► GND   (pull-up interno del MCP23017 habilitado por I2C)
+```
+
+> Los pull-ups de los switches se habilitan por software (registro GPPU = 0xFF).
+> Sin resistores pull-up externos en el PCB para los switches. ✓ Ahorra espacio.
+
+---
+
+### 🟡 BLOQUE F10 — Encoders EC11 ×8 (rotary encoders con push)
+
+**UI principal. Cada encoder necesita 2 canales de timer + 1 GPIO de push.**
+
+```
+── Esquema idéntico para cada uno de los 8 encoders ──
+
+EC11_n Pin A ──[10kΩ]──► +3.3V
+             ──[100nF]──► GND
+             ──────────► TIMx_CH1 (ver tabla)
+
+EC11_n Pin B ──[10kΩ]──► +3.3V
+             ──[100nF]──► GND
+             ──────────► TIMx_CH2 (ver tabla)
+
+EC11_n Pin C (push) ──[10kΩ]──► +3.3V
+                    ──[100nF]──► GND
+                    ──────────► GPIO_IN (ver tabla)
+
+EC11_n COM  ──► GND
+
+── Asignación de pines por encoder ──
+Enc 1: TIM2_CH1=PA15, TIM2_CH2=PB3,  Push=PD0
+Enc 2: TIM3_CH1=PC6,  TIM3_CH2=PC7,  Push=PD1
+Enc 3: TIM4_CH1=PD12, TIM4_CH2=PD13, Push=PD2
+Enc 4: TIM5_CH1=PA0,  TIM5_CH2=PA1,  Push=PD3   ← PA0/PA1 también son ADC — evitar conflicto
+Enc 5–8: TIM8 y TIM15 (confirmar en CubeMX según pines disponibles)
+```
+
+> El condensador 100nF entre el pin y GND es el filtro anti-rebote hardware.
+> Sin él los timers cuentan pulsos de ruido mecánico al girar rápido.
+
+---
+
+### 🟡 BLOQUE F11 — Potenciómetros RV3 y RV4
+
+**Solo 2 potenciómetros físicos: Master Volume y Filter Cutoff.**
+
+```
+RV3 — Master Volume (10kΩ lineal, footprint 9mm plástico):
+  Pin 1 (CCW) ──► GND
+  Pin 2 (wiper) ──[10nF a GND]──► PA0 (ADC1_IN0)   net: POT_VOLUME
+  Pin 3 (CW)  ──► +3.3V
+
+RV4 — Filter Cutoff (10kΩ lineal):
+  Pin 1 (CCW) ──► GND
+  Pin 2 (wiper) ──[10nF a GND]──► PA1 (ADC1_IN1)   net: POT_CUTOFF
+  Pin 3 (CW)  ──► +3.3V
+```
+
+> ⚠️ PIN CW → +3.3V (NO a +5V). El ADC del STM32H743 es 3.3V máximo.
+> El 10nF entre wiper y GND filtra el ruido de aliasing.
+> Si Enc 4 usa PA0/PA1, hay conflicto → asignar Enc4 a otros pines o usar ADC en DMA.
+
+---
+
+### 🟢 BLOQUE F12 — PCA9685 Driver LEDs PWM (16 canales)
+
+**LEDs del secuenciador. Mismo bus I2C1.**
+
+```
+STM32H743 I2C1          PCA9685 (TSSOP28, dirección: 0x40)
+──────────────           ──────────────────────────────────
+PB8 (SCL) ─────────────► Pin 19 (SCL)
+PB9 (SDA) ─────────────► Pin 18 (SDA)
+PD12 (GPIO OUT) ────────► Pin 20 (~OE)  + [10kΩ pull-down a GND] ← LEDs ON por defecto
+
+Pin 1–6  (A0–A5) ──► GND  → dirección 0x40
+Pin 17 (VDD)  ──► +3.3V + C [100nF] ──► GND
+Pin 16 (GND)  ──► GND
+Pin 21 (EXTCLK) ──► GND (oscilador interno)
+
+── Salidas LED (misma conexión ×16) ──
+Pin LED_n ──[R 330Ω, 0402]──► LED_ANODE ──► LED ──► GND
+  Cálculo: (3.3V - 2.0V_fwd) / 330Ω = 3.9mA (visible, bajo consumo)
+  Para más brillo: usar 150Ω → 8.7mA
+```
+
+> Si quieres LEDs bicolor (rojo + verde por paso): necesitas 2× PCA9685.
+> Segundo en dirección 0x41 (A0 → +3.3V, A1–A5 → GND).
+
+---
+
+### 🟢 BLOQUE F13 — MIDI DIN IN (optoacoplador 6N137)
+
+**Entrada MIDI DIN-5. USART1_RX = PA10.**
+
+```
+DIN-5 conector MIDI IN:
+  Pin 4 ──────────────────────────────────────► Cátodo LED (pin 3 del 6N137)
+  Pin 5 ──[220Ω, 0402]──[1N4148 SOD-123]──────► Ánodo LED (pin 2 del 6N137)
+  Pin 2 ──► NC
+  Shell ──► GND
+
+6N137 (DIP8 o SOIC8):
+  Pin 2 (Anode)   ← desde DIN Pin 5 via 220Ω + 1N4148
+  Pin 3 (Cathode) ← desde DIN Pin 4
+  Pin 1 (VCC)     ──► +3.3V + C [100nF] ──► GND
+  Pin 5 (GND)     ──► GND
+  Pin 6 (Vo)      ──[10kΩ pull-up a +3.3V]──► PA10 (USART1_RX)
+  Pin 7 (ENABLE)  ──► +3.3V
+  Pin 8 (VCC)     ──► +3.3V
+```
+
+> El diodo 1N4148 protege contra conexión de cable MIDI al revés.
+> Sin él un MIDI mal conectado puede destruir el optoacoplador.
+
+---
+
+### 🟢 BLOQUE F14 — MIDI DIN OUT
+
+**Salida MIDI DIN-5. USART1_TX = PA9.**
+
+```
+PA9 (USART1_TX) ──[220Ω]──► DIN-5 Pin 5
+                ──[220Ω]──► DIN-5 Pin 4
++3.3V ──────────[220Ω]──► DIN-5 Pin 2   ← corriente de loop (estándar MIDI)
+DIN-5 Pin 1, 3 ──► NC
+DIN-5 Shell    ──► GND
+```
+
+> Los dos resistores 220Ω en Pin 4 y Pin 5 son estándar del spec MIDI DIN.
+> El de Pin 2 (+3.3V via 220Ω) completa el loop de corriente — obligatorio según MIDI 1.0 spec.
+
+---
+
+### 🟢 BLOQUE F15 — Conector USB-B MIDI (datos USB al PC)
+
+**USB MIDI class-compliant. Separado del USB-C de power. Mismos pines PA11/PA12.**
+
+```
+USB-B conector (THT):
+  Pin 1 (VBUS) ──[Polyfuse 500mA]──► VBUS_DETECT ──[100kΩ]──► GND
+  Pin 2 (D-)   ──► USBLC6-2 I/O1 ──► PA11 (USB_DM)
+  Pin 3 (D+)   ──► USBLC6-2 I/O2 ──► PA12 (USB_DP)
+  Pin 4 (GND)  ──► GND
+  Shell        ──► GND (chasis)
+
+USBLC6-2SC6 (SOT-23-6) — protección ESD datos:
+  I/O1 ←──► D-  (bidireccional)
+  I/O2 ←──► D+  (bidireccional)
+  VCC  ──► VBUS (protección al bus)
+  GND  ──► GND
+```
+
+> ⚠️ El USB-C de power y el USB-B de MIDI **no comparten pines D+/D−** en el STM32.
+> Ambos comparten PA11/PA12 — solo uno puede estar activo a la vez. El firmware
+> usa PA11/PA12 exclusivamente para USB MIDI. El USB-C es solo power.
+> Si en el futuro quieres DFU Y MIDI por el mismo conector, usar solo el USB-C y multiplexar por BOOT0.
 
 ---
 
@@ -308,7 +618,7 @@ Los siguientes bloques **no están en ninguna imagen** — deben crearse:
 ```
 ANTES DE CONTINUAR DISEÑANDO:
   1. Corregir CC1/CC2 en USB-C (pull-down a GND, no pull-up) — CRÍTICO
-  2. Corregir BOOT0 R1 (pull-down a GND) — CRÍTICO
+  2. Cambiar BOOT0: pull-down 10kΩ a GND + header JP1 para DFU — CRÍTICO
   3. Conectar XSMT del PCM5122 a +3.3VA o GPIO — CRÍTICO
   4. Añadir bloque +5VA (ferrite desde 5V_BUS) — CRÍTICO
   5. Eliminar R2 (1K5) en USB_DP del STM32
@@ -333,7 +643,13 @@ DESPUÉS (bloques nuevos):
 
 ## NOTAS ADICIONALES
 
-**Sobre el AMS1117 vs ADP3335:**
+**Sobre programación sin ST-Link — DFU por USB:**
+No necesitas ningún programador externo. El STM32H743 tiene bootloader DFU en ROM.
+Circuito: pull-down 10kΩ en BOOT0 + header JP1 de 2 pines a +3.3V.
+Software: STM32CubeProgrammer (gratis) → detecto el chip via USB sin drivers especiales.
+Flujo: coloca jumper JP1 → conecta USB → flashea → quita jumper → reset → funciona.
+
+
 El AMS1117-3.3 es un cambio aceptable respecto al ADP3335 especificado en la guía.
 El AMS1117 suministra hasta 1A (más que el ADP3335 de 500mA) y es más económico.
 La diferencia en PSRR es negligible para el rail digital. ✅ OK mantenerlo.
