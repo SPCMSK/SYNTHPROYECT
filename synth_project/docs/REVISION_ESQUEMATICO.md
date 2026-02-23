@@ -115,19 +115,22 @@ defectuoso o no enumerará — esto afecta tanto DFU como MIDI.
 
 **Imagen:** `DAC AUDIO.png`
 
-**Lo que tiene:** Pin 25 (XSMT) con una flecha pero sin net conectada clara.
+**Lo que tiene en el esquemático actual:** XSMT (pin 25) → `PC3_GPIO` ✓
 
-**Problema:** XSMT = 0 (LOW o flotante) → **DAC silenciado permanentemente**.
-El chip funciona, recibe I2S, pero bloquea la salida analógica internamente.
+**Esto es correcto y mejor que +3.3VA fijo** — permite control de mute por firmware.
 
-**Lo que debe ser:**
+⚠️ **TRAMPA CRÍTICA DE FIRMWARE:** Si PC3 arranca en LOW (estado por defecto de los GPIO
+del STM32 al encender), el DAC estará **muteado hasta que el firmware lo desactive**.
+Esto puede confundirse con un fallo de audio al hacer pruebas iniciales.
+
+**En CubeMX/código de inicialización, OBLIGATORIO:**
+```c
+// Inmediatamente después de init, antes de reproducir audio:
+HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);  // XSMT = HIGH = unmute
 ```
-XSMT (pin 25) → [10kΩ pull-up] → +3.3VA
-               también → PC3_GPIO   ← para soft-mute desde firmware
-```
-Si no se necesita control de mute desde GPIO, simplemente conectar directamente a +3.3VA.
+O configurar PC3 como output con **valor inicial HIGH** en CubeMX (Output level: High).
 
-**Fix aplicado:** XSMT conectado a +3.3VA. ✅
+**Fix aplicado:** XSMT conectado a PC3_GPIO ✅ — añadir inicialización HIGH en firmware.
 
 ---
 
@@ -369,27 +372,51 @@ GND     ──────────► GND
 
 ---
 
-### 🔴 BLOQUE F5 — Jacks Salida Audio (TRS 6.35mm + RCA)
+### ✅ BLOQUE F5 — Jacks Salida Audio (COMPLETADO)
 
-**Las nets L/R_CHAN_PLUG y L/R_CHAN_RCA ya salen del bloque PCM5122. Solo faltan los jacks.**
+**Las nets L_CHAN y R_CHAN ya salen del filtro RC del PCM5122 y se bifurcan a PLUG y RCA.**
+
+**¿Se necesita op-amp?**
+**No.** El PCM5122 en modo single-ended (que es lo que tienes) tiene buffer de salida
+interno. Puede manejar directamente las entradas de cualquier equipo (mezcladores, interfaces,
+monitores activos) que típicamente son 10kΩ–100kΩ. Sin op-amp necesario. ✓
+
+**Circuito actual — ya correcto ✓**
+```
+                R8 470Ω          C36 2n2        R10 100Ω
+PCM5122 OUTR ──[R8, 470Ω]──┬──[C36, 2n2]──► GNDA     ├──────────► R_CHAN_PLUG ──► J_TRS_R Tip
+                            │                          R11 100Ω
+                            └──────────────────────────┴──────────► R_CHAN_RCA  ──► J_RCA_R Tip
+
+                R9 470Ω          C40 2n2        R12 100Ω
+PCM5122 OUTL ──[R9, 470Ω]──┬──[C40, 2n2]──► GNDA     ├──────────► L_CHAN_PLUG ──► J_TRS_L Tip
+                            │                          R13 100Ω
+                            └──────────────────────────┴──────────► L_CHAN_RCA  ──► J_RCA_L Tip
+
+Todos los Sleeve/Shell ──► GNDA
+```
+
+**El filtro 470Ω + 2.2nF** es un low-pass con fc = 1/(2π × 470 × 2.2e-9) ≈ **154 kHz** — limpia
+aliasing de ultrasonido sin tocar el audio audible (20Hz–20kHz). ✓
+
+**Los 100Ω en serie** hacia cada jack aislan capacitancias de cable y protegen contra cortocircuito. ✓
+
+**Símbolo KiCad usado:** `Connector_Audio:NRJ4HF-1` (Neutrik, horizontal, mono) × 2
+Footprint incluido: `Connector_Audio:Jack_6.35mm_Neutrik_NRJ4HF-1_Horizontal` ✓
 
 ```
-── Canal Izquierdo ──
-L_CHAN_PLUG ──► J_TRS_L [Jack TRS 6.35mm]   Tip = audio L, Sleeve = GNDA
-L_CHAN_RCA  ──► J_RCA_L [Jack RCA]           Tip = audio L, Sleeve = GNDA
-
-── Canal Derecho ──
-R_CHAN_PLUG ──► J_TRS_R [Jack TRS 6.35mm]   Tip = audio R, Sleeve = GNDA
-R_CHAN_RCA  ──► J_RCA_R [Jack RCA]           Tip = audio R, Sleeve = GNDA
-
-── Protección ESD en cada jack (opcional pero recomendado) ──
-Tip de cada jack ──► BAT54S (doble schottky SOT-23):
-  Diodo 1: Tip ──► GNDA  (clamp negativo)
-  Diodo 2: +5VA ──► Tip  (clamp positivo)
+J8 — Canal DERECHO               J6 — Canal IZQUIERDO
+──────────────────               ────────────────────
+T  ──► R_CHAN_PLUG                T  ──► L_CHAN_PLUG
+S  ──► GNDA                       S  ──► GNDA
+G  ──► GNDA  (chassis)            G  ──► GNDA  (chassis)
+TN ──► NC                         TN ──► NC
 ```
 
-> Footprint TRS 6.35mm recomendado: SJ-63035-SMT-TR (CUI) — PCB mount.
-> Footprint RCA recomendado: RCJ-014 (CUI) — PCB mount.
+> TN es el contacto normalmente cerrado que se abre al insertar el jack — no conectar.
+> G es el blindaje metálico del conector — conectar a GNDA igual que S.
+> ⚠️ No añadir BAT54S ni diodos en señal de audio — distorsionan.
+> Footprint RCA recomendado: `Connector_Audio:Jack_RCA_CUI_RCJ-014` — PCB mount.
 
 ---
 
@@ -397,16 +424,31 @@ Tip de cada jack ──► BAT54S (doble schottky SOT-23):
 
 **Las nets CV1..CV3 ya salen del DAC8565. VOUTD está NC pero puede añadirse como CV4.**
 
+**¿Se necesita op-amp en la salida CV?**
+**No.** El DAC8565 tiene un **buffer de salida rail-to-rail integrado** — es un DAC de
+salida en tensión, no en corriente. Puede conducir directamente cargas ≥ 2kΩ, que es lo
+normal en entradas CV de cualquier gear (Eurorack, synths, etc. tienen tipicamente 100kΩ+).
+El 100Ω en serie es suficiente protección.
+
+**Rango de salida — importante:**
+| Configuración | Rango VOUT | Octavas (1V/oct) |
+|---|---|---|
+| Gain=1 (por defecto) | 0 — 2.5V | 2.5 octavas |
+| Gain=2 (bit G via SPI) | 0 — 5V | 5 octavas ← **recomendado** |
+
+Para gain=2, enviar el comando SPI con bit G=1 durante la inicialización del firmware.
+Requiere AVDD ≥ 4.5V → ya lo tienes con +5VA. ✓
+
 ```
 ── Conexión idéntica para los 4 jacks ──
 DAC8565 VOUTx ──[100Ω, 0402]──► J_CVx [Jack TRS 3.5mm]
-                                  Tip    = CV signal (0–2.5V)
+                                  Tip    = CV signal (0–5V con gain=2)
                                   Ring   = NC
                                   Sleeve = GNDA
 
 ── Protección por jack (BAT54S, SOT-23) ──
-  Diodo A (katodo → +5VA ó +3.3V, ánodo → Tip): clamp positivo
-  Diodo B (katodo → Tip, ánodo → GNDA): clamp negativo
+  Diodo A (ánodo → Tip, katodo → +5VA): clamp positivo
+  Diodo B (ánodo → GNDA, katodo → Tip): clamp negativo
   → previene que un Eurorack inyecte ±12V hacia el DAC8565
 ```
 
@@ -657,7 +699,7 @@ CORRECCIONES APLICADAS ✅:
 BLOQUES PENDIENTES (diseñar en KiCad):
   11. ○ F1 — VCAP conexiones en bloque decoupling
   12. ○ F4 — USBLC6-2 ESD en USB datos
-  13. ○ F5 — Jacks audio TRS 6.35mm + RCA
+  13. ✅ F5 — Jacks audio: 2× NRJ4HF-1 (L/R) + RCJ-32265 triple RCA (C sin conectar)
   14. ○ F6 — Jacks CV 4× TRS 3.5mm + BAT54S
   15. ○ F7 — Flash W25Q128 (SPI2)
   16. ○ F8 — OLED SSD1306 (I2C)
